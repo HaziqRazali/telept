@@ -9,7 +9,7 @@ Circle annotator on the first frame of a video.
 Usage:
     conda activate orbbec
     python annotate_circle.py
-    python /home/haziq/datasets/telept/my_scripts/orbbec_scripts/annotate_circle.py --video_path /home/haziq/datasets/telept/data/ipad/170326_18-04/170326_18-04.mp4
+    python /home/haziq/datasets/telept/my_scripts/orbbec_scripts/annotate_circle.py --video_path /home/haziq/datasets/telept/data/mocap_recordings/2026_03_20.mp4
 """
 
 import cv2

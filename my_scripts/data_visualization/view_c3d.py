@@ -1,7 +1,8 @@
 """
 Interactive C3D marker viewer with frame scrubber.
 Usage:
-    python view_c3d.py [path/to/file.c3d]
+
+python view_c3d.py /home/haziq/datasets/telept/data/mocap_recordings/2026_03_20.c3d
 
 Controls:
     Slider   – scrub to any frame
@@ -58,6 +59,9 @@ def load_c3d(path):
     print(f"  Rate    : {frame_rate} fps")
     print(f"  Units   : {units}")
     print(f"  Duration: {xyz.shape[2]/frame_rate:.1f} s")
+    print(f"  Marker names:")
+    for i, lbl in enumerate(all_labels):
+        print(f"    [{i:3d}] {lbl}")
 
     return xyz, res, all_labels, frame_rate, units
 
