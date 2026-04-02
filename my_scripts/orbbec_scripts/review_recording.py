@@ -2,8 +2,8 @@
 Review a recorded IR + RGB session side-by-side.
 
 Usage:
-    python review_recording.py ir_20260402_171419
-    python review_recording.py ir_20260402_171419 --fps 15
+    python review_recording.py /home/haziq/datasets/telept/data/mocap/20141017/take1/ir_20260402_175610
+    python review_recording.py ir_20260402_175610 --fps 15
 
 Controls:
     Space / Right arrow  : next frame
@@ -125,9 +125,10 @@ def main():
             rgb = np.zeros((1080, 1920, 3), dtype=np.uint8)
         return ir_bgr, rgb, rgb_frame_no
 
-    cv2.namedWindow("IR + RGB Review", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("IR + RGB Review",
-                     IR_DISPLAY_SIZE[0] + RGB_DISPLAY_SIZE[0], PANEL_HEIGHT + 36)
+    WIN = "IR + RGB Review"
+    cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(WIN, IR_DISPLAY_SIZE[0] + RGB_DISPLAY_SIZE[0], PANEL_HEIGHT + 36)
+    cv2.createTrackbar("Frame", WIN, 0, total - 1, lambda x: None)
 
     ir_bgr, rgb_bgr, cur_rgb_no = read_pair(idx)
 
@@ -135,10 +136,16 @@ def main():
         rgb_info = f"RGB#{cur_rgb_no}" if sync_index is not None else ""
         fps_label = f"{'PLAY' if playing else 'PAUSE'}  {play_fps:.0f}fps  {rgb_info}"
         frame = make_side_by_side(ir_bgr, rgb_bgr, idx, total, fps_label)
-        cv2.imshow("IR + RGB Review", frame)
+        cv2.imshow(WIN, frame)
 
-        wait = delay_ms if playing else 0
+        wait = delay_ms if playing else 30   # never block forever so trackbar is polled
         key  = cv2.waitKey(wait) & 0xFF
+
+        # ── trackbar scrub (user dragged the slider) ───────────────────────
+        tb_idx = cv2.getTrackbarPos("Frame", WIN)
+        if tb_idx != idx:
+            idx = tb_idx
+            ir_bgr, rgb_bgr, cur_rgb_no = read_pair(idx)
 
         if key == ord('q'):
             break
@@ -153,30 +160,36 @@ def main():
         elif key in (ord(' '), 83, 0xFF & ord('d')):   # Space / Right / d
             idx = min(idx + 1, total - 1)
             ir_bgr, rgb_bgr, cur_rgb_no = read_pair(idx)
+            cv2.setTrackbarPos("Frame", WIN, idx)
         elif key in (81, 0xFF & ord('a')):             # Left / a
             idx = max(idx - 1, 0)
             ir_bgr, rgb_bgr, cur_rgb_no = read_pair(idx)
+            cv2.setTrackbarPos("Frame", WIN, idx)
         elif key == ord('f'):
             idx = min(idx + 10, total - 1)
             ir_bgr, rgb_bgr, cur_rgb_no = read_pair(idx)
+            cv2.setTrackbarPos("Frame", WIN, idx)
         elif key == ord('b'):
             idx = max(idx - 10, 0)
             ir_bgr, rgb_bgr, cur_rgb_no = read_pair(idx)
+            cv2.setTrackbarPos("Frame", WIN, idx)
         elif key == ord('g'):
             n = input(f"  Go to frame [0-{total-1}]: ").strip()
             if n.isdigit():
                 idx = max(0, min(int(n), total - 1))
             ir_bgr, rgb_bgr, cur_rgb_no = read_pair(idx)
+            cv2.setTrackbarPos("Frame", WIN, idx)
         elif playing:
             # Auto-advance
             if idx < total - 1:
                 idx += 1
                 ir_bgr, rgb_bgr, cur_rgb_no = read_pair(idx)
+                cv2.setTrackbarPos("Frame", WIN, idx)
             else:
                 playing = False  # end of recording
 
     cap.release()
-    cv2.destroyAllWindows()
+    cv2.destroyAllWindows(WIN)
 
 
 if __name__ == "__main__":
