@@ -1,0 +1,37 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug TrueDepth (new)",
+            "type": "python",
+            "request": "launch",
+            "python": "/home/haziq/anaconda3/envs/pytorch_env_backup/bin/python",
+            "program": "${workspaceFolder}/data/ipad/truedepth_play_new.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "OPEN3D_CPU_RENDERING": "true"
+            },
+            "cwd": "${workspaceFolder}/data/ipad",
+            "args": [
+                // "/home/haziq/datasets/telept/data/ipad/20251001-hh/depth_1759295456074.zip"
+            ]
+        },
+        {
+            "name": "Debug TrueDepth (old)",
+            "type": "python",
+            "request": "launch",
+            "python": "/home/haziq/anaconda3/envs/pytorch_env_backup/bin/python",
+            "program": "${workspaceFolder}/data/ipad/truedepth_play.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "OPEN3D_CPU_RENDERING": "true"
+            },
+            "cwd": "${workspaceFolder}/data/ipad",
+            "args": [
+                // "/home/haziq/datasets/telept/data/ipad/20251001-hh/depth_1759295456074.zip"
+            ]
+        }
+    ]
+}
