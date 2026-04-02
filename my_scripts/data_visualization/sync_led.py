@@ -27,16 +27,16 @@ import matplotlib.widgets as mwidgets
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 # ── paths ─────────────────────────────────────────────────────────────────────
-C3D_PATH    = "/home/haziq/datasets/telept/data/mocap_recordings/LED1.c3d"
-FULL_PATH   = "/home/haziq/datasets/telept/data/mocap_recordings/LED1.mp4"
-CROP_PATH   = "/home/haziq/datasets/telept/data/mocap_recordings/LED1_cropped.mp4"
+C3D_PATH    = "/home/haziq/datasets/telept/data/mocap/LED1.c3d"
+FULL_PATH   = "/home/haziq/datasets/telept/data/mocap/LED1.mp4"
+CROP_PATH   = "/home/haziq/datasets/telept/data/mocap/LED1_cropped.mp4"
 INIT_THRESH = 75
 
 # crop box in full-frame coords
 CROP_X1, CROP_Y1 = 766, 2244
 CROP_X2, CROP_Y2 = 806, 2284    # 40x40 px
 FULL_SCALE  = 8                 # cache full frames at 1/FULL_SCALE resolution
-SAVE_PATH   = "/home/haziq/datasets/telept/data/mocap_recordings/sync_led_recording.mp4"
+SAVE_PATH   = "/home/haziq/datasets/telept/data/mocap/sync_led_recording.mp4"
 RECORD_FPS  = 30                # output video fps
 
 # ─── 1. Load C3D ──────────────────────────────────────────────────────────────

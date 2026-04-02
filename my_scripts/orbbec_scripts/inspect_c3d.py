@@ -7,7 +7,8 @@ Usage:
 import numpy as np
 import ezc3d
 
-C3D_PATH = "/data/telept/my_scripts/orbbec_scripts/Take 2014-10-02 05.49.50 AM.c3d"
+#C3D_PATH = "/data/telept/my_scripts/orbbec_scripts/Take 2014-10-02 05.49.50 AM.c3d"
+C3D_PATH = "/home/haziq/datasets/telept/data/mocap/2026_03_20.c3d"
 
 c = ezc3d.c3d(C3D_PATH)
 

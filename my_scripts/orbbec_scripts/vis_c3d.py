@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.widgets import Slider
 
-C3D_PATH = "/data/telept/my_scripts/orbbec_scripts/Take 2014-10-02 05.49.50 AM.c3d"
+C3D_PATH = "/home/haziq/datasets/telept/data/mocap/2026_03_20.c3d"
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 c = ezc3d.c3d(C3D_PATH)
@@ -56,8 +56,9 @@ ax.set_zlim(zmin - margin, zmax + margin)
 # Initial scatter for each marker
 scatters = []
 for i in range(n_markers):
-    sc = ax.scatter([], [], [], s=60, color=colors[i], label=labels[i], depthshade=True)
-    scatters.append(sc)
+    if "Reference_Marker" in labels[i]:
+        sc = ax.scatter([], [], [], s=60, color=colors[i], label=labels[i], depthshade=True)
+        scatters.append(sc)
 
 ax.legend(loc="upper left", fontsize=6, ncol=2, framealpha=0.5)
 title = ax.set_title(f"Frame 0 / {n_frames - 1}  |  t = 0.000 s")
