@@ -33,7 +33,7 @@ PANEL_HEIGHT     = 512          # unified height for both panels (RGB letterboxe
 def load_ir(path: str) -> np.ndarray:
     """Load a 16-bit IR frame and convert to 8-bit BGR for display."""
     ir16 = np.load(path)
-    ir8  = (ir16 >> 8).astype(np.uint8)   # 65535 → 255; background ~0
+    ir8  = cv2.normalize(ir16, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     return cv2.cvtColor(ir8, cv2.COLOR_GRAY2BGR)
 
 

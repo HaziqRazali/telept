@@ -33,7 +33,7 @@ Controls
 import os
 import glob
 
-from itertools import permutations as _permutations
+from itertools import permutations as _permutations, combinations as _combinations
 
 import numpy as np
 import cv2
@@ -56,24 +56,37 @@ except ImportError:
     print("WARNING: ezc3d not found — install with: pip install ezc3d")
 
 
-# ── Orbbec Femto Bolt IR camera intrinsics ────────────────────────────────────
+# ── Orbbec Femto Bolt IR camera intrinsics (640×576) ─────────────────────────
+# Source: print_ir_intrinsics.py  (Orbbec SDK readback)
+# NOTE: The Orbbec SDK reports k1=17, k2=9.4 for the IR sensor.  These large
+#       values look unusual for OpenCV's Brown-Conrady model and may actually
+#       be Kannala-Brandt / fisheye coefficients.  If reprojection error stays
+#       high, try setting DIST to np.zeros(5) first to isolate the problem.
 K = np.array([
-    [1123.86669921875, 0.0,               948.0269165039062],
-    [0.0,              1123.028076171875,  539.6485595703125],
-    [0.0,              0.0,               1.0              ],
+    [504.14373779296875, 0.0,               329.8353271484375],
+    [0.0,               504.02496337890625, 334.18988037109375],
+    [0.0,               0.0,               1.0              ],
 ], dtype=np.float64)
 
+# Option A: SDK values — only correct if the SDK uses Brown-Conrady (unusual for IR)
 DIST = np.array([
-     0.07333821058273315,
-    -0.10178927332162857,
-    -0.0004722462617792189,
-    -0.00022512981377076358,
-     0.041689008474349976,
-], dtype=np.float64)  # k1, k2, p1, p2, k3 (OpenCV order)
+    17.021440505981445,
+     9.416301727294922,
+     7.297786214621738e-05,
+     3.846113759209402e-05,
+     0.3900681436061859,
+], dtype=np.float64)  # k1, k2, p1, p2, k3 (OpenCV order — see NOTE above)
+
+# Option B: no distortion — use this first to diagnose; if reprojection error is
+#           acceptable it means K is correct and only the distortion model is wrong
+DIST = np.zeros(5, dtype=np.float64)
 
 # ── constants ──────────────────────────────────────────────────────────────────
 INIT_IR_THRESH = 30
 MIN_BLOB_AREA  = 4
+# How many extra IR blobs above expected_n to tolerate per frame.
+# 0 = exact match only;  1 = allow one noise blob (tries C(n+1,n) subsets).
+BLOB_N_TOLERANCE = 1
 CROSS_SIZE     = 6
 CROSS_COLOR    = (0, 255, 0)
 IR_BBOX_COLOR  = (0, 80, 255)    # BGR orange for IR ignore bboxes
@@ -242,7 +255,12 @@ def _reproj_err(pts3d, pts2d, rvec, tvec):
 
 
 def best_pnp(pts3d, pts2d_candidates, init_rvec=None, init_tvec=None):
-    """Try all N! pairings. Return (rvec, tvec, error, best_permutation).
+    """Try all N! pairings (and C(M,N) subsets if M > N candidates).
+    Returns (rvec, tvec, error, best_permutation).
+
+    When len(pts2d_candidates) > len(pts3d) (extra noise blob), all
+    C(M,N) subsets of the 2D candidates are tried, each with all N!
+    orderings — the subset+ordering with lowest reprojection error wins.
 
     If init_rvec/init_tvec are provided (temporal prior from previous frame),
     SOLVEPNP_ITERATIVE is used with useExtrinsicGuess=True so the solver
@@ -256,7 +274,8 @@ def best_pnp(pts3d, pts2d_candidates, init_rvec=None, init_tvec=None):
 
     After the best permutation is found, one LM refinement step is applied.
     """
-    n        = len(pts3d)
+    n      = len(pts3d)
+    n_cand = len(pts2d_candidates)
     use_init = init_rvec is not None and init_tvec is not None
     if use_init:
         method = cv2.SOLVEPNP_ITERATIVE
@@ -267,26 +286,35 @@ def best_pnp(pts3d, pts2d_candidates, init_rvec=None, init_tvec=None):
     else:
         method = cv2.SOLVEPNP_SQPNP
 
+    # All subsets of 2D candidates of size n (handles extra noise blobs)
+    if n_cand > n:
+        subsets = list(_combinations(range(n_cand), n))
+    else:
+        subsets = [tuple(range(n))]
+
     best_e = float("inf")
     best_r = best_t = None
     best_p = list(range(n))
 
-    for perm in _permutations(range(n)):
-        pts2d = pts2d_candidates[list(perm)].astype(np.float64)
-        if use_init:
-            ok, rvec, tvec = cv2.solvePnP(
-                pts3d.astype(np.float64), pts2d, K, DIST,
-                init_rvec.copy(), init_tvec.copy(),
-                useExtrinsicGuess=True, flags=method)
-        else:
-            ok, rvec, tvec = cv2.solvePnP(
-                pts3d.astype(np.float64), pts2d, K, DIST,
-                flags=method)
-        if not ok:
-            continue
-        err = _reproj_err(pts3d, pts2d, rvec, tvec)
-        if err < best_e:
-            best_e = err; best_r = rvec.copy(); best_t = tvec.copy(); best_p = list(perm)
+    for subset in subsets:
+        sub_pts2d = pts2d_candidates[list(subset)]
+        for perm in _permutations(range(n)):
+            pts2d = sub_pts2d[list(perm)].astype(np.float64)
+            if use_init:
+                ok, rvec, tvec = cv2.solvePnP(
+                    pts3d.astype(np.float64), pts2d, K, DIST,
+                    init_rvec.copy(), init_tvec.copy(),
+                    useExtrinsicGuess=True, flags=method)
+            else:
+                ok, rvec, tvec = cv2.solvePnP(
+                    pts3d.astype(np.float64), pts2d, K, DIST,
+                    flags=method)
+            if not ok:
+                continue
+            err = _reproj_err(pts3d, pts2d, rvec, tvec)
+            if err < best_e:
+                best_e = err; best_r = rvec.copy(); best_t = tvec.copy()
+                best_p = [subset[p] for p in perm]
 
     # LM refinement on the winning permutation
     if best_r is not None:
@@ -346,7 +374,7 @@ ST = {
 
     # frames with per-frame reproj error above this threshold are excluded
     # from the final rvec/tvec median (set to 0 to disable)
-    "max_err": 3.0,
+    "max_err": 20.0,  # loosened default — tighten after confirming K/DIST are correct
 
     # offset loaded flag — IR dir loading is blocked until this is True
     "offset_loaded": False,
@@ -616,7 +644,10 @@ def _frame_in_range(ir_idx):
 
 
 def _count_valid_frames():
-    """Count frames where marker counts match AND frame is in the PnP range."""
+    """Count frames where marker counts match AND frame is in the PnP range.
+    Mirrors the logic in _collect_frames: C3D must equal expected_n exactly;
+    IR blobs may be up to BLOB_N_TOLERANCE above expected_n.
+    """
     if ST["all_clusters"] is None or ST["c3d_xyz"] is None:
         return None
     n = ST["expected_n"]
@@ -624,7 +655,8 @@ def _count_valid_frames():
     for ir_idx in range(ST["ir_n"]):
         if not _frame_in_range(ir_idx):
             continue
-        if len(ST["all_clusters"][ir_idx]) != n:
+        n_blobs = len(ST["all_clusters"][ir_idx])
+        if not (n <= n_blobs <= n + BLOB_N_TOLERANCE):
             continue
         c3d_f  = ir_frame_to_c3d_frame(ir_idx)
         active = _get_c3d_active_indices(c3d_f)
@@ -652,8 +684,10 @@ def _update_info(ir_idx, c3d_f, n_clusters, n_c3d_active):
         t_ir = f"  t={dt:.3f}s"
     pnp_stat = "  PnP: computed ✓" if ST["pnp_rvec_med"] is not None else "  PnP: not run"
     n         = ST["expected_n"]
-    n_match   = (n_clusters == n and n_c3d_active == n)
+    # IR blobs: allow [n, n+BLOB_N_TOLERANCE]; C3D must be exactly n
+    n_match   = (n <= n_clusters <= n + BLOB_N_TOLERANCE and n_c3d_active == n)
     in_range  = _frame_in_range(ir_idx)
+    tol_note  = f"+{BLOB_N_TOLERANCE}" if BLOB_N_TOLERANCE else ""
     if n_match and in_range:
         validity = "  ✓ VALID (count+range)"
         color = "#88ff88"
@@ -661,7 +695,7 @@ def _update_info(ir_idx, c3d_f, n_clusters, n_c3d_active):
         validity = "  ✗ out of range"
         color = "#ffaa44"
     elif in_range:
-        validity = f"  ✗ count mismatch (need {n}+{n})"
+        validity = f"  ✗ count mismatch (IR need {n}–{n+BLOB_N_TOLERANCE}, C3D need {n})"
         color = "#ff6666"
     else:
         validity = f"  ✗ out of range + count mismatch"
@@ -1229,7 +1263,10 @@ def on_run_pnp(event):
             clusters = ST["all_clusters"][ir_idx]
             active   = _get_c3d_active_indices(c3d_f)
             pts3d_f  = ST["c3d_xyz"][:, active, c3d_f].T.astype(np.float64)
-            if len(pts3d_f) != expected_n or len(clusters) != expected_n:
+            # Require exact C3D count; allow up to BLOB_N_TOLERANCE extra IR blobs
+            if len(pts3d_f) != expected_n:
+                continue
+            if not (expected_n <= len(clusters) <= expected_n + BLOB_N_TOLERANCE):
                 continue
             pts2d_f = np.array([[cx, cy] for cx, cy, _ in clusters], dtype=np.float64)
             yield ir_idx, pts3d_f, pts2d_f
@@ -1305,8 +1342,26 @@ def on_run_pnp(event):
         return
 
     n_used   = len(all_rvec)
-    rvec_med = np.median(all_rvec, axis=0)
-    tvec_med = np.median(all_tvec, axis=0)
+
+    # ── robust mean rotation via chordal SO(3) averaging ──────────────────────
+    # np.median on raw Rodrigues vectors is WRONG: equivalent rotations can
+    # have wildly different vec representations (axis flip, 2π wrap), so the
+    # component-wise median produces a garbage result.
+    # Correct approach: convert to rotation matrices, sum them, project the
+    # sum back to SO(3) via SVD (Procrustes / chordal mean).
+    R_sum = np.zeros((3, 3), dtype=np.float64)
+    for rv in all_rvec:
+        R, _ = cv2.Rodrigues(rv.reshape(3, 1))
+        R_sum += R
+    U, _, Vt = np.linalg.svd(R_sum)
+    R_mean = U @ Vt
+    if np.linalg.det(R_mean) < 0:          # ensure proper rotation (det=+1)
+        U[:, -1] *= -1
+        R_mean = U @ Vt
+    rvec_med, _ = cv2.Rodrigues(R_mean)
+    rvec_med = rvec_med.flatten()
+
+    tvec_med = np.median(all_tvec, axis=0)  # translation: component-wise median is fine
 
     p50 = np.median(all_err)
     p75 = np.percentile(all_err, 75)

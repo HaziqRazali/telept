@@ -7,11 +7,11 @@ The Femto Bolt alternates every hardware frame between:
 
 Frame rates:
   RGB : 30fps (every frameset, full rate)
-  IR  : ~15fps (active IR only — hardware limitation, every other frame is flood)
+  IR  : ~15fps saved (active IR only — flood frames are displayed but not saved)
 
 Saves:
   ir_YYYYMMDD_HHMMSS/
-      frame_000000.npy  — raw 16-bit IR (1024x1024 uint16), lossless, ~15fps
+      frame_000000.npy  — raw 16-bit IR (640x576 uint16), lossless, ~15fps (active only)
       frame_000001.npy
       ...
       sync_index.npy    — int array: sync_index[i] = RGB frame number for IR frame i
@@ -33,17 +33,17 @@ import numpy as np
 from pyorbbecsdk import Pipeline, Config, OBSensorType, OBFormat
 
 SAVE_DIR = os.path.dirname(os.path.abspath(__file__))
-ACTIVE_IR_THRESHOLD = 5000  # frames with max below this are flood IR, skip them
+ACTIVE_IR_THRESHOLD = 5000  # frames with max below this are flood IR, skip saving
 
 
 def main():
     pipeline = Pipeline()
     config = Config()
 
-    # IR stream: 1024x1024 @ 30fps Y16
+    # IR stream: 640x576 @ 30fps Y16 (Femto Bolt default — 1024x1024 is not available on this unit)
     ir_profiles = pipeline.get_stream_profile_list(OBSensorType.IR_SENSOR)
     try:
-        ir_profile = ir_profiles.get_video_stream_profile(1024, 1024, OBFormat.Y16, 30)
+        ir_profile = ir_profiles.get_video_stream_profile(640, 576, OBFormat.Y16, 30)
     except Exception:
         ir_profile = ir_profiles.get_default_video_stream_profile()
     config.enable_stream(ir_profile)
@@ -73,7 +73,7 @@ def main():
         return
 
     print("Streaming started.")
-    print(f"  IR  -> {ir_dir}/frame_NNNNNN.npy  (~15fps, raw 16-bit)")
+    print(f"  IR  -> {ir_dir}/frame_NNNNNN.npy  (~15fps, active IR only, raw 16-bit)")
     print(f"  RGB -> {rgb_path}  (30fps)")
     print("Press 'q' to quit and save.")
 
@@ -108,29 +108,29 @@ def main():
             ir_data = np.frombuffer(ir_frame.get_data(), dtype=np.uint16).reshape(
                 (ir_frame.get_height(), ir_frame.get_width()))
 
-            # Skip flood IR frames — only save active IR (~15fps)
-            if ir_data.max() < ACTIVE_IR_THRESHOLD:
-                continue
+            is_active = ir_data.max() >= ACTIVE_IR_THRESHOLD
 
-            # Save IR as raw 16-bit numpy array
-            np.save(os.path.join(ir_dir, f"frame_{saved_ir_count:06d}.npy"), ir_data)
-            sync_index.append(current_rgb_idx)
-            saved_ir_count += 1
+            # Save only active IR frames (~15fps) — sync_index maps to paired RGB frame
+            if is_active:
+                np.save(os.path.join(ir_dir, f"frame_{saved_ir_count:06d}.npy"), ir_data)
+                sync_index.append(current_rgb_idx)
+                saved_ir_count += 1
 
-            # FPS (IR rate)
-            frame_count += 1
-            elapsed = time.time() - t_start
-            if elapsed >= 0.5:
-                fps = frame_count / elapsed
-                frame_count = 0
-                t_start = time.time()
+                # FPS (active IR rate)
+                frame_count += 1
+                elapsed = time.time() - t_start
+                if elapsed >= 0.5:
+                    fps = frame_count / elapsed
+                    frame_count = 0
+                    t_start = time.time()
 
-            # Display IR (scale 16-bit -> 8-bit for preview)
+            # Display IR for every frame (flood or active) so preview is always live
             ir_8 = (ir_data >> 8).astype(np.uint8)
             ir_disp = cv2.cvtColor(ir_8, cv2.COLOR_GRAY2BGR)
-            cv2.putText(ir_disp, f"IR {fps:.1f}fps  #{saved_ir_count}  |  RGB #{rgb_frame_count}", (20, 40),
+            label = f"IR {fps:.1f}fps  saved={saved_ir_count}  {'ACTIVE' if is_active else 'flood'}  |  RGB #{rgb_frame_count}"
+            cv2.putText(ir_disp, label, (20, 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-            cv2.imshow("Active IR (q to quit)", ir_disp)
+            cv2.imshow("IR (q to quit)", ir_disp)
 
             # Display RGB (scaled down for screen)
             rgb_disp = cv2.resize(color_img, (960, 540))
