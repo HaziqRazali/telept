@@ -1,0 +1,32 @@
+*.avi
+*.mp4
+*.c3d
+*.npy
+
+# ── Flutter build outputs ──────────────────────────────────────────────────
+app/mobile/build/
+app/mobile/.dart_tool/
+app/mobile/.flutter-plugins
+app/mobile/.flutter-plugins-dependencies
+app/mobile/.packages
+app/mobile/**/*.g.dart
+app/mobile/**/*.freezed.dart
+
+# ── Android build outputs ──────────────────────────────────────────────────
+app/mobile/android/.gradle/
+app/mobile/android/app/.cxx/
+app/mobile/android/app/build/
+app/mobile/android/local.properties
+
+# ── iOS build outputs ─────────────────────────────────────────────────────
+app/mobile/ios/build/
+app/mobile/ios/Pods/
+app/mobile/ios/.symlinks/
+app/mobile/ios/Flutter/flutter_export_environment.sh
+app/mobile/ios/Flutter/Generated.xcconfig
+
+# ── Python / server ───────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.env
