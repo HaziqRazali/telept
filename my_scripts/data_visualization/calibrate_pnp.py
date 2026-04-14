@@ -31,9 +31,12 @@ Controls
 """
 
 import os
+import sys
 import glob
+import argparse
 
 from itertools import permutations as _permutations, combinations as _combinations
+from scipy.optimize import linear_sum_assignment as _hungarian
 
 import numpy as np
 import cv2
@@ -342,6 +345,7 @@ ST = {
     "ignore_bboxes": [],       # list of (x1,y1,x2,y2) in IR pixel coords
 
     # C3D data
+    "c3d_path":   None,        # absolute path to the .c3d file (saved in boxes.txt)
     "c3d_xyz":    None,        # (3, M, N)
     "c3d_fps":    1.0,
     "c3d_n":      0,
@@ -382,6 +386,10 @@ ST = {
     # PnP frame range (IR frame indices; None = not set)
     "pnp_start": None,
     "pnp_end":   None,
+    # list of (s, e) IR frame index pairs to EXCLUDE from PnP
+    # (complements the include range; any frame in an excl segment is skipped)
+    "pnp_excl_segs":      [],
+    "pnp_excl_pend_start": None,  # pending exclusion start ([ key pressed)
 }
 
 _im_ir  = None
@@ -401,6 +409,20 @@ def ir_frame_to_c3d_frame(ir_idx):
     dt = (orb_f - ST["orb_frame_offset"]) / (ST["orb_fps"] or 1.0)
     return int(np.clip(ST["c3d_frame_offset"] + round(dt * ST["c3d_fps"]),
                        0, ST["c3d_n"] - 1))
+
+
+def ir_frame_to_c3d_frame_float(ir_idx):
+    """Return the fractional C3D frame index corresponding to IR frame ir_idx.
+    Used for sub-frame interpolation of marker positions."""
+    if ST["npy_files"] is None or ST["c3d_xyz"] is None:
+        return 0.0
+    if ST["sync_index"] is not None:
+        orb_f = int(ST["sync_index"][min(ir_idx, len(ST["sync_index"])-1)])
+    else:
+        orb_f = ir_idx
+    dt = (orb_f - ST["orb_frame_offset"]) / (ST["orb_fps"] or 1.0)
+    return float(np.clip(ST["c3d_frame_offset"] + dt * ST["c3d_fps"],
+                         0.0, ST["c3d_n"] - 1.0))
 
 
 # ── C3D ignore bbox helpers ────────────────────────────────────────────────────
@@ -597,24 +619,31 @@ n_textbox.label.set_color("#aaaaff"); n_textbox.label.set_fontsize(7.5)
 n_textbox.text_disp.set_color("#ffff88"); n_textbox.text_disp.set_fontsize(11)
 
 # Set Start / Set End buttons — mark the IR frame range used for PnP
-ax_b_set_start = fig.add_axes([0.43, 0.030, 0.11, 0.030])
+ax_b_set_start = fig.add_axes([0.43, 0.030, 0.095, 0.030])
 btn_set_start  = mwidgets.Button(ax_b_set_start, "[ Set Start ]",
                                    color="#112211", hovercolor="#224422")
 btn_set_start.label.set_color("#44ff44"); btn_set_start.label.set_fontsize(8)
 
-ax_b_set_end = fig.add_axes([0.56, 0.030, 0.11, 0.030])
+ax_b_set_end = fig.add_axes([0.535, 0.030, 0.095, 0.030])
 btn_set_end  = mwidgets.Button(ax_b_set_end, "[ Set End ]",
                                  color="#221111", hovercolor="#442222")
 btn_set_end.label.set_color("#ff4444"); btn_set_end.label.set_fontsize(8)
 
-ax_b_clear_range = fig.add_axes([0.69, 0.030, 0.09, 0.030])
+ax_b_clear_range = fig.add_axes([0.640, 0.030, 0.075, 0.030])
 btn_clear_range  = mwidgets.Button(ax_b_clear_range, "Clear Range",
                                     color="#2a1a1a", hovercolor="#443333")
 btn_clear_range.label.set_color("#ffaaaa"); btn_clear_range.label.set_fontsize(8)
 
+# Exclude segment buttons — [ ] to mark start/end, Clr Excl to wipe all
+# Usage: navigate to bad frames, press '[' to mark start, ']' to mark end and add.
+ax_b_clr_excl = fig.add_axes([0.725, 0.030, 0.075, 0.030])
+btn_clr_excl  = mwidgets.Button(ax_b_clr_excl, "Clr Excl",
+                                  color="#1a1a2a", hovercolor="#333355")
+btn_clr_excl.label.set_color("#aaaaff"); btn_clr_excl.label.set_fontsize(8)
+
 # Max reprojection error filter — frames above this are excluded from median
 # Set to 0 to keep all frames.
-ax_maxerr_box = fig.add_axes([0.81, 0.030, 0.04, 0.030], facecolor="#1a1a1a")
+ax_maxerr_box = fig.add_axes([0.85, 0.030, 0.04, 0.030], facecolor="#1a1a1a")
 maxerr_textbox = mwidgets.TextBox(
     ax_maxerr_box,
     "max reproj err (px)  ",
@@ -639,8 +668,16 @@ fig.patches.append(_c3d_rubber)
 def _frame_in_range(ir_idx):
     s = ST["pnp_start"]; e = ST["pnp_end"]
     if s is None or e is None:
-        return True   # no range set → all frames allowed
-    return s <= ir_idx <= e
+        in_inc = True
+    else:
+        in_inc = s <= ir_idx <= e
+    if not in_inc:
+        return False
+    # check exclusion segments
+    for (es, ee) in ST["pnp_excl_segs"]:
+        if es <= ir_idx <= ee:
+            return False
+    return True
 
 
 def _count_valid_frames():
@@ -791,8 +828,11 @@ def _full_redraw(ir_idx, c3d_override=None):
 # ── slider activation ─────────────────────────────────────────────────────────
 
 def _update_range_lines():
-    """Refresh the green/red range marker lines on the IR slider."""
+    """Refresh the green/red range marker lines and exclusion patches on the IR slider."""
     n = ST["ir_n"]
+    # remove old excl patches
+    for patch in list(ax_ir_sl.patches):
+        patch.remove()
     if n < 2:
         _range_start_line.set_visible(False)
         _range_end_line.set_visible(False)
@@ -807,6 +847,13 @@ def _update_range_lines():
         _range_end_line.set_visible(True)
     else:
         _range_end_line.set_visible(False)
+    # draw exclusion segments as red semi-transparent patches
+    for (es, ee) in ST["pnp_excl_segs"]:
+        ax_ir_sl.axvspan(es, ee, color="#ff3300", alpha=0.35, zorder=0)
+    # draw pending exclusion start as orange dashed line
+    if ST["pnp_excl_pend_start"] is not None:
+        ax_ir_sl.axvline(ST["pnp_excl_pend_start"], color="#ff9900",
+                         linestyle="--", linewidth=1.2, zorder=2)
 
 
 def _activate_ir_slider(n, start=0):
@@ -889,7 +936,7 @@ def on_load_c3d(event):
     btn_c3d.label.set_text("Loading…"); fig.canvas.draw_idle(); fig.canvas.flush_events()
     xyz, fps, n, t, bounds = load_c3d(path)
     ST.update({"c3d_xyz": xyz, "c3d_fps": fps, "c3d_n": n,
-               "c3d_t": t, "c3d_bounds": bounds})
+               "c3d_t": t, "c3d_bounds": bounds, "c3d_path": os.path.abspath(path)})
     print(f"  C3D: {n} frames @ {fps:.4f} fps  markers: {xyz.shape[1]}")
     ax_c3d.set_xlim(bounds[0]); ax_c3d.set_ylim(bounds[1]); ax_c3d.set_zlim(bounds[2])
     c3d_start = ir_frame_to_c3d_frame(int(ir_sl.val)) if ST["npy_files"] is not None \
@@ -1029,22 +1076,70 @@ def on_clear_range(event):
     _refresh_range_ui()
 
 
+def on_clr_excl(event):
+    ST["pnp_excl_segs"].clear()
+    ST["pnp_excl_pend_start"] = None
+    print("Exclusion segments cleared")
+    _refresh_range_ui()
+
+
+def _excl_mark_start(ir_idx):
+    """Mark the start of a new exclusion segment."""
+    ST["pnp_excl_pend_start"] = ir_idx
+    print(f"Excl start = {ir_idx}  (navigate to end frame and press ']' to add)")
+    _refresh_range_ui()
+
+
+def _excl_mark_end(ir_idx):
+    """Commit the pending exclusion segment ending at ir_idx."""
+    s = ST["pnp_excl_pend_start"]
+    if s is None:
+        print("No excl start set — press '[' first.")
+        return
+    a, b = min(s, ir_idx), max(s, ir_idx)
+    ST["pnp_excl_segs"].append((a, b))
+    ST["pnp_excl_pend_start"] = None
+    print(f"Excl segment added: {a}\u2013{b}  (total: {len(ST['pnp_excl_segs'])})")
+    _refresh_range_ui()
+
+
+def _excl_remove_at(ir_idx):
+    """Remove the exclusion segment that contains ir_idx, if any."""
+    segs = ST["pnp_excl_segs"]
+    for i, (a, b) in enumerate(segs):
+        if a <= ir_idx <= b:
+            segs.pop(i)
+            print(f"Excl segment removed: {a}\u2013{b}")
+            _refresh_range_ui()
+            return
+    print(f"No exclusion segment at frame {ir_idx}")
+
+
 # ── save / load boxes ─────────────────────────────────────────────────────────
 
 def on_save_boxes(event):
     save_dir = ST["offset_dir"] or ST["ir_dir"] or "."
     path = os.path.join(save_dir, "boxes.txt")
-    lines = ["# calibrate_pnp.py — ignore bounding boxes\n"]
+    lines = ["# calibrate_pnp.py — session state\n"]
+    # save data paths so Load Boxes can restore the full session in one click
+    if ST.get("c3d_path"):
+        lines.append(f"c3d_path={ST['c3d_path']}\n")
+    if ST.get("ir_dir"):
+        lines.append(f"ir_dir={os.path.abspath(ST['ir_dir'])}\n")
     lines.append("# IR ignore bboxes (image pixel coords: x1,y1,x2,y2)\n")
     for (x1, y1, x2, y2) in ST["ignore_bboxes"]:
         lines.append(f"ir_bbox={int(x1)},{int(y1)},{int(x2)},{int(y2)}\n")
     lines.append("# C3D ignore bboxes (screen display-pixel coords — view-dependent)\n")
     for (x1d, y1d, x2d, y2d) in ST["c3d_ignore_bboxes"]:
         lines.append(f"c3d_bbox={x1d:.1f},{y1d:.1f},{x2d:.1f},{y2d:.1f}\n")
+    lines.append("# Exclusion segments (IR frame index ranges to skip from PnP)\n")
+    for (es, ee) in ST["pnp_excl_segs"]:
+        lines.append(f"excl_seg={es},{ee}\n")
     with open(path, "w") as fh:
         fh.writelines(lines)
     print(f"Saved boxes → {path}  "
-          f"(IR: {len(ST['ignore_bboxes'])}  C3D: {len(ST['c3d_ignore_bboxes'])})")
+          f"(IR: {len(ST['ignore_bboxes'])}  C3D: {len(ST['c3d_ignore_bboxes'])}  "
+          f"excl segs: {len(ST['pnp_excl_segs'])})")
     btn_save_boxes.label.set_text("✓ Saved")
     btn_save_boxes.ax.set_facecolor("#333300")
     fig.canvas.draw_idle()
@@ -1054,28 +1149,101 @@ def on_load_boxes(event):
     path = _ask_file("Open boxes.txt", [("Text", "*.txt"), ("All", "*.*")])
     if not path:
         return
+    _load_boxes_from(path)
+
+
+def _load_boxes_from(path):
+    """Parse boxes.txt and restore all session state. auto-loads C3D and IR dir if
+    c3d_path= and ir_dir= lines are present and those resources aren't already loaded."""
     ir_bboxes  = []
     c3d_bboxes = []
+    excl_segs  = []
+    c3d_path_saved = None
+    ir_dir_saved   = None
     with open(path) as fh:
         for line in fh:
             line = line.strip()
             if line.startswith("#") or "=" not in line:
                 continue
             key, val = line.split("=", 1)
-            nums = [float(v) for v in val.split(",")]
-            if key.strip() == "ir_bbox" and len(nums) == 4:
-                ir_bboxes.append(tuple(int(v) for v in nums))
-            elif key.strip() == "c3d_bbox" and len(nums) == 4:
-                c3d_bboxes.append(tuple(nums))
+            key = key.strip()
+            if key == "c3d_path":
+                c3d_path_saved = val.strip()
+            elif key == "ir_dir":
+                ir_dir_saved = val.strip()
+            else:
+                nums = [float(v) for v in val.split(",")]
+                if key == "ir_bbox" and len(nums) == 4:
+                    ir_bboxes.append(tuple(int(v) for v in nums))
+                elif key == "c3d_bbox" and len(nums) == 4:
+                    c3d_bboxes.append(tuple(nums))
+                elif key == "excl_seg" and len(nums) == 2:
+                    excl_segs.append((int(nums[0]), int(nums[1])))
+
     ST["ignore_bboxes"][:] = ir_bboxes
     ST["c3d_ignore_bboxes"][:] = c3d_bboxes
+    ST["pnp_excl_segs"][:] = excl_segs
+    ST["pnp_excl_pend_start"] = None
+    print(f"Loaded boxes ← {path}  "
+          f"(IR: {len(ir_bboxes)}  C3D: {len(c3d_bboxes)}  "
+          f"excl segs: {len(excl_segs)})")
+
+    # auto-load C3D if path saved and not yet loaded
+    if c3d_path_saved and ST["c3d_xyz"] is None:
+        if os.path.exists(c3d_path_saved):
+            print(f"  Auto-loading C3D: {c3d_path_saved}")
+            btn_c3d.label.set_text("Loading…"); fig.canvas.draw_idle(); fig.canvas.flush_events()
+            xyz, fps, n, t, bounds = load_c3d(c3d_path_saved)
+            ST.update({"c3d_xyz": xyz, "c3d_fps": fps, "c3d_n": n,
+                       "c3d_t": t, "c3d_bounds": bounds, "c3d_path": c3d_path_saved})
+            print(f"    C3D: {n} frames @ {fps:.4f} fps  markers: {xyz.shape[1]}")
+            ax_c3d.set_xlim(bounds[0]); ax_c3d.set_ylim(bounds[1]); ax_c3d.set_zlim(bounds[2])
+            btn_c3d.label.set_text("✓ C3D"); btn_c3d.ax.set_facecolor("#222238")
+        else:
+            print(f"  WARNING: saved c3d_path not found: {c3d_path_saved}")
+
+    # auto-load IR dir if path saved and not yet loaded
+    if ir_dir_saved and ST["npy_files"] is None:
+        if os.path.isdir(ir_dir_saved):
+            npy_files = sorted(glob.glob(os.path.join(ir_dir_saved, "frame_*.npy")))
+            if npy_files:
+                print(f"  Auto-loading IR dir: {ir_dir_saved}")
+                # ensure offset.txt is loaded (auto-load from parent of ir_dir)
+                if not ST["offset_loaded"]:
+                    off_path = os.path.join(os.path.dirname(ir_dir_saved), "offset.txt")
+                    if os.path.exists(off_path):
+                        _apply_offset(parse_offset(off_path))
+                        ST["offset_dir"] = os.path.dirname(os.path.abspath(off_path))
+                        print(f"    offset.txt auto-loaded from {off_path}")
+                        btn_offset.label.set_text("✓ offset.txt (auto)")
+                        btn_offset.ax.set_facecolor("#223322")
+                sync_path  = os.path.join(ir_dir_saved, "sync_index.npy")
+                sync_index = np.load(sync_path) if os.path.exists(sync_path) else None
+                ST.update({"ir_dir": ir_dir_saved, "npy_files": npy_files,
+                           "sync_index": sync_index, "ir_n": len(npy_files)})
+                ST["pnp_start"] = None; ST["pnp_end"] = None
+                print(f"    Precomputing clusters for {len(npy_files)} IR frames …")
+                btn_ir.label.set_text("Computing…"); fig.canvas.draw_idle(); fig.canvas.flush_events()
+                def _prog(i, n):
+                    btn_ir.label.set_text(f"Computing {i}/{n}")
+                    fig.canvas.draw_idle(); fig.canvas.flush_events()
+                ST["all_clusters"] = precompute_clusters(
+                    npy_files, int(thresh_sl.val), ST["ignore_bboxes"], _prog)
+                print("    Done.")
+                _ph_ir.set_visible(False)
+                _activate_ir_slider(len(npy_files), start=ST["orb_frame_offset"])
+                btn_ir.label.set_text("✓ IR Dir"); btn_ir.ax.set_facecolor("#1a3322")
+            else:
+                print(f"  WARNING: no frame_*.npy in saved ir_dir: {ir_dir_saved}")
+        else:
+            print(f"  WARNING: saved ir_dir not found: {ir_dir_saved}")
+
     _sync_c3d_bbox_patches()
     if ST["npy_files"] is not None:
         _recompute_ir()
+        _update_range_lines()
     else:
         fig.canvas.draw_idle()
-    print(f"Loaded boxes ← {path}  "
-          f"(IR: {len(ir_bboxes)}  C3D: {len(c3d_bboxes)})")
     btn_load_boxes.label.set_text("✓ Loaded")
     btn_load_boxes.ax.set_facecolor("#1a3322")
     fig.canvas.draw_idle()
@@ -1254,15 +1422,43 @@ def on_run_pnp(event):
     print(f"  sync: orb_frame → dt = (orb_f - {ST['orb_frame_offset']}) / {ST['orb_fps']:.4f}  "
           f"→ c3d_frame = {ST['c3d_frame_offset']} + dt × {ST['c3d_fps']:.4f}")
 
+    n_excl = 0  # frames skipped by include-range or exclusion segments (counted once in Pass 1)
+    _excl_counted = False  # flag: only accumulate n_excl on first pass
+
     def _collect_frames():
-        """Yield (ir_idx, pts3d, pts2d) for all frames passing filters 1+2."""
+        """Yield (ir_idx, pts3d, pts2d) for all frames passing filters 1+2.
+        pts3d uses sub-frame linear interpolation of C3D marker positions to
+        reduce temporal aliasing error (±0.5 C3D frame → ±1.67ms at 300fps).
+        """
+        nonlocal n_excl, _excl_counted
+        xyz   = ST["c3d_xyz"]    # (3, M, F_c3d)
+        c3d_n = ST["c3d_n"]
         for ir_idx in range(ST["ir_n"]):
             if not _frame_in_range(ir_idx):
+                if not _excl_counted:
+                    n_excl += 1
                 continue
-            c3d_f    = ir_frame_to_c3d_frame(ir_idx)
+            # fractional C3D frame index for sub-frame interpolation
+            c3d_ff   = ir_frame_to_c3d_frame_float(ir_idx)
+            c3d_f0   = int(c3d_ff)
+            c3d_f1   = min(c3d_f0 + 1, c3d_n - 1)
+            alpha    = c3d_ff - c3d_f0          # blending weight [0, 1)
+            c3d_f    = c3d_f0                   # integer frame for active-marker filtering
             clusters = ST["all_clusters"][ir_idx]
             active   = _get_c3d_active_indices(c3d_f)
-            pts3d_f  = ST["c3d_xyz"][:, active, c3d_f].T.astype(np.float64)
+            # Interpolate 3D positions between adjacent C3D frames
+            p0 = xyz[:, active, c3d_f0].T.astype(np.float64)  # (N, 3)
+            p1 = xyz[:, active, c3d_f1].T.astype(np.float64)  # (N, 3)
+            # Fall back to non-NaN frame per marker individually
+            valid0 = np.all(np.isfinite(p0), axis=1)
+            valid1 = np.all(np.isfinite(p1), axis=1)
+            if not np.all(valid0 | valid1):
+                continue   # some marker is invisible in both frames
+            pts3d_f = np.where(
+                (valid0 & valid1)[:, None],
+                (1.0 - alpha) * p0 + alpha * p1,   # both valid: interpolate
+                np.where(valid0[:, None], p0, p1),  # one valid: use it
+            )
             # Require exact C3D count; allow up to BLOB_N_TOLERANCE extra IR blobs
             if len(pts3d_f) != expected_n:
                 continue
@@ -1284,6 +1480,7 @@ def on_run_pnp(event):
         if len(p1_rvec) % 100 == 0:
             print(f"    {len(p1_rvec)} frames …  mean err={np.mean(p1_err):.3f}px",
                   flush=True)
+    _excl_counted = True  # don't re-accumulate n_excl in subsequent passes
 
     if not p1_rvec:
         _msgbox("PnP", f"No valid frames found.\nSkipped: {n_skip}\n"
@@ -1304,15 +1501,19 @@ def on_run_pnp(event):
     # extrinsic guess, preventing mirror-flip ambiguity on symmetric shapes.
     print("  Pass 2: temporally-consistent re-solve …")
     p2_rvec, p2_tvec, p2_err, p2_ir = [], [], [], []
+    p2_pts3d, p2_pts2d = [], []          # matched correspondences per frame
     prev_r = rough_rvec.reshape(3, 1).copy()
     prev_t = rough_tvec.reshape(3, 1).copy()
     for ir_idx, pts3d_f, pts2d_f in _collect_frames():
-        rvec, tvec, err, _ = best_pnp(pts3d_f, pts2d_f,
-                                       init_rvec=prev_r, init_tvec=prev_t)
+        rvec, tvec, err, best_p = best_pnp(pts3d_f, pts2d_f,
+                                           init_rvec=prev_r, init_tvec=prev_t)
         if rvec is None:
             continue
         p2_rvec.append(rvec.flatten()); p2_tvec.append(tvec.flatten())
         p2_err.append(err);             p2_ir.append(ir_idx)
+        # store the correctly-ordered 2D↔3D pair for global optimisation
+        p2_pts3d.append(pts3d_f)                      # (n, 3)
+        p2_pts2d.append(pts2d_f[best_p[:len(pts3d_f)]])  # (n, 2) matched order
         prev_r = rvec.copy(); prev_t = tvec.copy()   # chain to next frame
         if len(p2_rvec) % 100 == 0:
             print(f"    {len(p2_rvec)} frames …  mean err={np.mean(p2_err):.3f}px",
@@ -1328,13 +1529,18 @@ def on_run_pnp(event):
     if max_err_thr > 0:
         keep = p2_err <= max_err_thr
         n_filtered = int((~keep).sum())
-        all_rvec = p2_rvec[keep]; all_tvec = p2_tvec[keep]
-        all_err  = p2_err[keep];  valid_ir  = [p2_ir[i] for i in range(len(p2_ir)) if keep[i]]
+        keep_idx  = [i for i, k in enumerate(keep) if k]
+        all_rvec  = p2_rvec[keep]; all_tvec = p2_tvec[keep]
+        all_err   = p2_err[keep];  valid_ir = [p2_ir[i] for i in keep_idx]
+        all_pts3d = [p2_pts3d[i] for i in keep_idx]
+        all_pts2d = [p2_pts2d[i] for i in keep_idx]
         print(f"  Max-err filter ({max_err_thr:.1f}px): "
               f"kept {keep.sum()}/{len(p2_rvec)}  removed {n_filtered}")
     else:
-        all_rvec = p2_rvec; all_tvec = p2_tvec
-        all_err  = p2_err;  valid_ir  = p2_ir
+        all_rvec  = p2_rvec; all_tvec = p2_tvec
+        all_err   = p2_err;  valid_ir = p2_ir
+        all_pts3d = p2_pts3d
+        all_pts2d = p2_pts2d
 
     if not len(all_rvec):
         _msgbox("PnP", f"All frames were filtered out by max reproj err={max_err_thr:.1f}px.\n"
@@ -1344,34 +1550,209 @@ def on_run_pnp(event):
     n_used   = len(all_rvec)
 
     # ── robust mean rotation via chordal SO(3) averaging ──────────────────────
-    # np.median on raw Rodrigues vectors is WRONG: equivalent rotations can
-    # have wildly different vec representations (axis flip, 2π wrap), so the
-    # component-wise median produces a garbage result.
-    # Correct approach: convert to rotation matrices, sum them, project the
-    # sum back to SO(3) via SVD (Procrustes / chordal mean).
+    # Used only as initialisation for Pass 3; not the final answer.
     R_sum = np.zeros((3, 3), dtype=np.float64)
     for rv in all_rvec:
         R, _ = cv2.Rodrigues(rv.reshape(3, 1))
         R_sum += R
     U, _, Vt = np.linalg.svd(R_sum)
     R_mean = U @ Vt
-    if np.linalg.det(R_mean) < 0:          # ensure proper rotation (det=+1)
+    if np.linalg.det(R_mean) < 0:
         U[:, -1] *= -1
         R_mean = U @ Vt
-    rvec_med, _ = cv2.Rodrigues(R_mean)
-    rvec_med = rvec_med.flatten()
+    rvec_init, _ = cv2.Rodrigues(R_mean)
+    tvec_init    = np.median(all_tvec, axis=0).reshape(3, 1)
 
-    tvec_med = np.median(all_tvec, axis=0)  # translation: component-wise median is fine
+    # ── Pass 3: single global optimisation over ALL frames ────────────────────
+    # Pass 2 determined the correct blob↔marker correspondences per frame.
+    # Now we stack every matched (pts3d, pts2d) pair into one big system and
+    # find the SINGLE (R, t) that minimises the total reprojection error
+    # across all frames simultaneously.  This is the statistically correct
+    # approach: the camera is physically fixed, so there is only one transform.
+    print("  Pass 3: global single-transform optimisation …")
+    stack_pts3d = np.vstack(all_pts3d).astype(np.float64)   # (N_total, 3)
+    stack_pts2d = np.vstack(all_pts2d).astype(np.float64)   # (N_total, 2)
+    print(f"    stacked {len(stack_pts3d)} point correspondences from "
+          f"{n_used} frames")
+
+    ok, rvec_g, tvec_g = cv2.solvePnP(
+        stack_pts3d, stack_pts2d, K, DIST,
+        rvec_init.copy(), tvec_init.copy(),
+        useExtrinsicGuess=True,
+        flags=cv2.SOLVEPNP_ITERATIVE)
+    if ok:
+        try:
+            cv2.solvePnPRefineLM(stack_pts3d, stack_pts2d, K, DIST,
+                                 rvec_g, tvec_g)
+        except cv2.error:
+            pass
+        proj_g, _ = cv2.projectPoints(stack_pts3d, rvec_g, tvec_g, K, DIST)
+        g3_errs   = np.linalg.norm(
+            proj_g.reshape(-1, 2) - stack_pts2d, axis=1)
+        g3_mean  = float(g3_errs.mean())
+        g3_p50   = float(np.median(g3_errs))
+        g3_p90   = float(np.percentile(g3_errs, 90))
+        print(f"    Global err: mean={g3_mean:.3f}px  "
+              f"p50={g3_p50:.3f}px  p90={g3_p90:.3f}px")
+        rvec_med = rvec_g.flatten()
+        tvec_med = tvec_g.flatten()
+        glob_errs = g3_errs   # default; Pass 4 may overwrite if it improves
+    else:
+        print("    WARNING: global solvePnP failed — falling back to chordal mean")
+        rvec_med = rvec_init.flatten()
+        tvec_med = tvec_init.flatten()
+        g3_mean = g3_p50 = g3_p90 = float("nan")
+
+    # ── Pass 4+: EM iterations — re-derive correspondences, re-solve, repeat ───
+    # Root cause of Pass 3 error >> Pass 2 error:
+    #   with near-symmetric markers, temporal chaining occasionally swaps two
+    #   marker labels, creating contradictory constraints in the global solve.
+    # Fix (EM):
+    #   E-step: given current (R,t), project markers → assign each to nearest
+    #           blob via Hungarian matching; discard ambiguous frames.
+    #   M-step: re-run global solvePnP+LM on clean correspondences.
+    #   Repeat until error converges.
+    # Threshold is tightened each round to progressively exclude bad frames.
+    P4_TIGHTEN_ITERS = 10     # Phase 1: tighten threshold 20→8px
+    P4_CONVERGE_ITERS = 15   # Phase 2: fixed 8px until converged
+    P4_THRESH_START  = 20.0  # px — loose first pass (transform still noisy)
+    P4_THRESH_END    = 8.0   # px — tight; held fixed in Phase 2
+    P4_CONVERGE_PX   = 0.02  # Phase 2 stop: |Δmean| < this for 2 consecutive iters
+
+    print("  Pass 4+: EM iterations (re-derive correspondences → re-solve) …")
+    print(f"    Phase 1: {P4_TIGHTEN_ITERS} iters tightening {P4_THRESH_START}→{P4_THRESH_END}px")
+    print(f"    Phase 2: up to {P4_CONVERGE_ITERS} iters at {P4_THRESH_END}px until Δ<{P4_CONVERGE_PX}px")
+    em_rv = rvec_med.reshape(3, 1).copy()
+    em_tv = tvec_med.reshape(3, 1).copy()
+    em_mean_prev = g3_mean
+    _consec_converged = 0
+
+    total_iters = P4_TIGHTEN_ITERS + P4_CONVERGE_ITERS
+    for em_iter in range(total_iters):
+        # Phase 1: linearly tighten threshold; Phase 2: hold at P4_THRESH_END
+        if em_iter < P4_TIGHTEN_ITERS:
+            frac = em_iter / max(P4_TIGHTEN_ITERS - 1, 1)
+            thresh = P4_THRESH_START + frac * (P4_THRESH_END - P4_THRESH_START)
+        else:
+            thresh = P4_THRESH_END
+
+        # E-step: Hungarian assignment for each frame
+        em_pts3d, em_pts2d, em_ir = [], [], []
+        em_frame_errs = []
+        for ir_idx, pts3d_f, pts2d_f_all in _collect_frames():
+            proj, _ = cv2.projectPoints(pts3d_f, em_rv, em_tv, K, DIST)
+            proj = proj.reshape(-1, 2)
+            cost = np.linalg.norm(
+                proj[:, None, :] - pts2d_f_all[None, :, :2], axis=2)
+            row_idx, col_idx = _hungarian(cost)
+            matched_cost = cost[row_idx, col_idx]
+            if matched_cost.max() > thresh:
+                continue
+            em_pts3d.append(pts3d_f[row_idx])
+            em_pts2d.append(pts2d_f_all[col_idx, :2])
+            em_ir.append(ir_idx)
+            em_frame_errs.append(float(matched_cost.mean()))
+
+        if len(em_pts3d) < 3:
+            print(f"    iter {em_iter+1}: too few frames ({len(em_pts3d)}) — stopping")
+            break
+
+        # M-step: global solvePnP
+        s_pts3d = np.vstack(em_pts3d).astype(np.float64)
+        s_pts2d = np.vstack(em_pts2d).astype(np.float64)
+        ok_em, rv_em, tv_em = cv2.solvePnP(
+            s_pts3d, s_pts2d, K, DIST,
+            em_rv.copy(), em_tv.copy(),
+            useExtrinsicGuess=True, flags=cv2.SOLVEPNP_ITERATIVE)
+        if not ok_em:
+            print(f"    iter {em_iter+1}: solvePnP failed — stopping")
+            break
+        try:
+            cv2.solvePnPRefineLM(s_pts3d, s_pts2d, K, DIST, rv_em, tv_em)
+        except cv2.error:
+            pass
+
+        proj_em, _ = cv2.projectPoints(s_pts3d, rv_em, tv_em, K, DIST)
+        em_errs = np.linalg.norm(proj_em.reshape(-1, 2) - s_pts2d, axis=1)
+        em_mean = float(em_errs.mean())
+        em_p50  = float(np.median(em_errs))
+        em_p90  = float(np.percentile(em_errs, 90))
+        delta   = em_mean_prev - em_mean
+
+        phase = 1 if em_iter < P4_TIGHTEN_ITERS else 2
+        print(f"    iter {em_iter+1:2d} [Ph{phase}]  thresh={thresh:.1f}px  "
+              f"frames={len(em_pts3d)}  pts={len(s_pts3d)}  "
+              f"mean={em_mean:.3f}px  p50={em_p50:.3f}  p90={em_p90:.3f}  "
+              f"Δ={delta:+.3f}px")
+
+        em_rv, em_tv = rv_em.copy(), tv_em.copy()
+
+        # keep track of the best result seen so far
+        if em_mean < g3_mean or np.isnan(g3_mean):
+            rvec_med  = em_rv.flatten()
+            tvec_med  = em_tv.flatten()
+            g3_mean, g3_p50, g3_p90 = em_mean, em_p50, em_p90
+            glob_errs = em_errs
+            valid_ir  = em_ir
+
+        # Phase 2 convergence: stop when |Δ| tiny for 2 consecutive iters
+        if em_iter >= P4_TIGHTEN_ITERS:
+            if abs(delta) < P4_CONVERGE_PX:
+                _consec_converged += 1
+                if _consec_converged >= 2:
+                    print(f"    converged (|Δ| < {P4_CONVERGE_PX}px for 2 iters)")
+                    break
+            else:
+                _consec_converged = 0
+        em_mean_prev = em_mean
+
+    # ── Diagnostic: per-frame residual distribution ───────────────────────────
+    # Tells us the irreducible error floor — if per-frame PnP gives 0.85px but
+    # global gives Xpx, the gap is from sync jitter / rig flex / marker motion.
+    if len(glob_errs):
+        pf_residuals = []
+        for ir_idx, pts3d_f, pts2d_f_all in _collect_frames():
+            if ir_idx not in set(valid_ir):
+                continue
+            proj, _ = cv2.projectPoints(
+                pts3d_f, rvec_med.reshape(3,1), tvec_med.reshape(3,1), K, DIST)
+            proj = proj.reshape(-1, 2)
+            cost = np.linalg.norm(
+                proj[:, None, :] - pts2d_f_all[None, :, :2], axis=2)
+            row_idx, col_idx = _hungarian(cost)
+            pf_residuals.append(cost[row_idx, col_idx].mean())
+        pf_residuals = np.array(pf_residuals)
+        print(f"\n  Per-frame residual with final transform:")
+        print(f"    mean={pf_residuals.mean():.3f}px  "
+              f"p50={np.median(pf_residuals):.3f}  "
+              f"p90={np.percentile(pf_residuals,90):.3f}  "
+              f"p95={np.percentile(pf_residuals,95):.3f}px")
+        print(f"    Frames with >5px mean residual: "
+              f"{(pf_residuals>5).sum()} / {len(pf_residuals)}")
+        print(f"    Frames with >2px mean residual: "
+              f"{(pf_residuals>2).sum()} / {len(pf_residuals)}")
+        print(f"    If >10%% of frames are >2px: likely sync jitter or rig flex,"
+              f" not a correspondence problem.")
 
     p50 = np.median(all_err)
     p75 = np.percentile(all_err, 75)
     p90 = np.percentile(all_err, 90)
     p95 = np.percentile(all_err, 95)
-    print(f"\nPnP done: {n_used} frames used  ({n_skip} skipped by count/range filter)")
-    print(f"  reproj err — mean: {all_err.mean():.3f}px  "
-          f"p50: {p50:.3f}  p75: {p75:.3f}  p90: {p90:.3f}  p95: {p95:.3f}px")
-    print(f"  rvec (med):  {rvec_med}")
-    print(f"  tvec (med):  {tvec_med}")
+
+    print(f"\nPnP done: {n_used} frames used  "
+          f"({n_excl} skipped by range/excl-segments  {n_skip} no-solve)")
+    print(f"  Pass 1/2 per-frame err (each frame's own solvePnP — optimistic):")
+    print(f"    mean={all_err.mean():.3f}px  p50={p50:.3f}  p75={p75:.3f}  "
+          f"p90={p90:.3f}  p95={p95:.3f}px")
+    print(f"  Best global err (Pass 3 → EM, single transform — what you see visually):")
+    print(f"    mean={g3_mean:.3f}px  p50={g3_p50:.3f}px  p90={g3_p90:.3f}px")
+    print(f"  rvec (global): {rvec_med}")
+    print(f"  tvec (global): {tvec_med}")
+
+    # glob_errs / g3_mean / g3_p50 / g3_p90 are already set to the best
+    # result (Pass 4 if it improved, otherwise Pass 3) by the blocks above.
+    if not ok:
+        glob_errs = np.array([])
 
     # store for live projection overlay
     ST["pnp_rvec_med"] = rvec_med
@@ -1382,6 +1763,7 @@ def on_run_pnp(event):
     np.savez(save_path,
              valid_ir_frames=np.array(valid_ir, dtype=np.int32),
              rvecs=all_rvec, tvecs=all_tvec, reproj_errors=all_err,
+             global_reproj_errors=glob_errs,
              rvec_median=rvec_med, tvec_median=tvec_med,
              K=K, dist=DIST, expected_n=np.int32(expected_n))
     print(f"  Saved → {save_path}")
@@ -1396,8 +1778,13 @@ def on_run_pnp(event):
             f"median err {np.median(p1_err):.3f}px\n"
             f"Pass 2 (temporal):    {len(p2_rvec)} frames  "
             f"median err {np.median(p2_err):.3f}px\n"
-            f"After max-err filter: {n_used} frames\n\n"
-            f"Reproj err  p50={p50:.3f}  p75={p75:.3f}  p90={p90:.3f}px\n\n"
+            f"After max-err filter: {n_used} frames\n"
+            f"Pass 3/4 correspondences: {len(stack_pts3d)} total points\n\n"
+            f"Per-frame reproj err (Pass 1/2, optimistic):\n"
+            f"  p50={p50:.3f}  p75={p75:.3f}  p90={p90:.3f}px\n\n"
+            f"Final global err (single transform, re-verified correspondences):\n"
+            f"  mean={g3_mean:.3f}px  p50={g3_p50:.3f}  p90={g3_p90:.3f}px\n"
+            f"  ← this is the real accuracy you see on the overlay\n\n"
             f"Saved → {save_path}\n\n"
             "IR panel now shows projected C3D markers as coloured circles.")
     fig.canvas.draw_idle()
@@ -1418,6 +1805,7 @@ btn_load_boxes.on_clicked(on_load_boxes)
 btn_set_start.on_clicked(on_set_start)
 btn_set_end.on_clicked(on_set_end)
 btn_clear_range.on_clicked(on_clear_range)
+btn_clr_excl.on_clicked(on_clr_excl)
 
 
 def _on_key(event):
@@ -1427,8 +1815,34 @@ def _on_key(event):
         _step(+1)
     elif event.key == "left":
         _step(-1)
+    elif event.key == "[":
+        if ST["npy_files"] is not None:
+            _excl_mark_start(int(ir_sl.val))
+    elif event.key == "]":
+        if ST["npy_files"] is not None:
+            _excl_mark_end(int(ir_sl.val))
+    elif event.key == "backspace" or event.key == "delete":
+        if ST["npy_files"] is not None:
+            _excl_remove_at(int(ir_sl.val))
 
 
 fig.canvas.mpl_connect("key_press_event", _on_key)
+
+# ── CLI args ─────────────────────────────────────────────────────────────────
+_ap = argparse.ArgumentParser(description="PnP calibration GUI", add_help=False)
+_ap.add_argument("--boxes", metavar="PATH",
+                 help="auto-load boxes.txt (and its c3d_path/ir_dir) on startup")
+_cli = _ap.parse_known_args(sys.argv[1:])[0]
+
+if _cli.boxes:
+    def _auto_load_boxes():
+        p = os.path.abspath(_cli.boxes)
+        if os.path.exists(p):
+            print(f"[startup] auto-loading boxes: {p}")
+            _load_boxes_from(p)
+        else:
+            print(f"[startup] --boxes path not found: {p}")
+    # schedule after 200 ms so the GUI is fully drawn before we start loading
+    fig.canvas.get_tk_widget().after(200, _auto_load_boxes)
 
 plt.show()

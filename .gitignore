@@ -18,15 +18,23 @@ app/mobile/android/app/.cxx/
 app/mobile/android/app/build/
 app/mobile/android/local.properties
 
-# ── iOS build outputs ─────────────────────────────────────────────────────
+# ── iOS build outputs / generated files ───────────────────────────────────
 app/mobile/ios/build/
 app/mobile/ios/Pods/
 app/mobile/ios/.symlinks/
 app/mobile/ios/Flutter/flutter_export_environment.sh
 app/mobile/ios/Flutter/Generated.xcconfig
+app/mobile/ios/Runner/GeneratedPluginRegistrant.h
+app/mobile/ios/Runner/GeneratedPluginRegistrant.m
 
 # ── Python / server ───────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
 .env
+
+# ── Large data files ──────────────────────────────────────────────────────
+data/
+*.zip
+my_scripts/orbbec_scripts/Log/
+my_scripts/data_visualization/temp.py
