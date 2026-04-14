@@ -178,7 +178,8 @@ This script:
 - Creates a `tele_pt` conda env with **Python 3.11** + **OpenJDK 17**
 - Downloads **Flutter 3.41.6** (stable) → `~/flutter`
 - Downloads and installs the **Android SDK** → `~/android-sdk`
-  - platform-tools (adb), build-tools 35.0.0, platforms android-35, NDK 28.2, CMake 3.22.1
+  - platform-tools (adb), build-tools 35.0.0, platforms android-35 & android-36, NDK 28.2, CMake 3.22.1
+  - Installs `clang` and `ninja-build` (needed for Flutter Linux toolchain) if missing
 - Writes conda activation hooks so `JAVA_HOME`, `ANDROID_SDK_ROOT`, and `PATH` are set automatically
 - Writes `mobile/android/local.properties` pointing at the SDK and Flutter installs
 - Runs `flutter pub get` to fetch all Dart dependencies
@@ -218,7 +219,10 @@ mv /tmp/cmdtools/cmdline-tools ~/android-sdk/cmdline-tools/latest
 export ANDROID_SDK_ROOT=~/android-sdk
 export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
 yes | sdkmanager --licenses
-sdkmanager "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;28.2.13433566" "cmake;3.22.1"
+sdkmanager "platform-tools" "build-tools;35.0.0" "build-tools;28.0.3" "platforms;android-35" "platforms;android-36" "ndk;28.2.13676358" "cmake;3.22.1"
+
+# linux toolchain deps (for flutter doctor)
+sudo apt-get install -y clang ninja-build
 
 # 5. local.properties
 cat > ~/telept/app/mobile/android/local.properties <<EOF
@@ -245,6 +249,7 @@ Expected output:
 ```
 [✓] Flutter (Channel stable, 3.41.6)
 [✓] Android toolchain - develop for Android devices
+[✓] Linux toolchain - develop for Linux desktop
 [✓] Connected device (1 available)        ← phone via USB
 ```
 

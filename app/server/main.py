@@ -23,10 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from config import HOST, MAX_UPLOAD_SIZE_MB, PORT, TEMP_DIR, USE_SAM3D
-from mesh_gen import generate_stub_meshes
-
-# Uncomment when USE_SAM3D=1:
-# from mesh_gen import generate_sam3d_meshes
+from mesh_gen import generate_stub_meshes, generate_sam3d_meshes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sam3d_server")
@@ -102,12 +99,7 @@ async def process_video(video: UploadFile = File(...)):
         t0 = time.time()
 
         if USE_SAM3D:
-            # Uncomment the import at the top and use:
-            # zip_path, n_frames, fps = generate_sam3d_meshes(video_path, work_dir)
-            raise HTTPException(
-                status_code=501,
-                detail="SAM3DBody processing is not yet enabled. Set USE_SAM3D=1 and uncomment the import.",
-            )
+            zip_path, n_frames, fps = generate_sam3d_meshes(video_path, work_dir)
         else:
             zip_path, n_frames, fps = generate_stub_meshes(video_path, work_dir)
 
@@ -149,5 +141,10 @@ def _cleanup_task(work_dir: str) -> BackgroundTask:
 # Entry point for `python main.py`
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    import socket
     import uvicorn
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
+        if _s.connect_ex(("127.0.0.1", PORT)) == 0:
+            print(f"\n  Port {PORT} is already in use. Kill it with:\n\n    fuser -k {PORT}/tcp\n")
+            raise SystemExit(1)
     uvicorn.run("main:app", host=HOST, port=PORT, reload=False, log_level="info")

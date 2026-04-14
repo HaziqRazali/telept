@@ -95,110 +95,185 @@ def generate_stub_meshes(video_path: str, work_dir: str) -> Tuple[str, int, floa
 
 
 # ---------------------------------------------------------------------------
-# SAM3DBody REAL PROCESSING  (uncomment when running on a GPU server)
+# SAM3DBody REAL PROCESSING  (Fast-SAM-3D-Body accelerated path)
 # ---------------------------------------------------------------------------
-#
-# import sys, torch
-# sys.path.insert(0, os.path.expanduser("~/sam-3d-body"))
-#
-# from sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
-# from config import (
-#     SAM3D_CHECKPOINT, SAM3D_MHR_PATH, SAM3D_DETECTOR_NAME,
-#     SAM3D_DETECTOR_PATH, SAM3D_SEGMENTOR_NAME, SAM3D_SEGMENTOR_PATH,
-#     SAM3D_FOV_NAME, SAM3D_FOV_PATH, SAM3D_BBOX_THRESH,
-# )
-#
-# _estimator: SAM3DBodyEstimator | None = None
-#
-#
-# def _get_estimator() -> SAM3DBodyEstimator:
-#     global _estimator
-#     if _estimator is not None:
-#         return _estimator
-#
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#     model, model_cfg = load_sam_3d_body(SAM3D_CHECKPOINT, device=device, mhr_path=SAM3D_MHR_PATH)
-#
-#     human_detector, human_segmentor, fov_estimator = None, None, None
-#
-#     if SAM3D_DETECTOR_NAME:
-#         from tools.build_detector import HumanDetector
-#         human_detector = HumanDetector(name=SAM3D_DETECTOR_NAME, device=device, path=SAM3D_DETECTOR_PATH)
-#
-#     if SAM3D_SEGMENTOR_NAME:
-#         from tools.build_sam import HumanSegmentor
-#         human_segmentor = HumanSegmentor(name=SAM3D_SEGMENTOR_NAME, device=device, path=SAM3D_SEGMENTOR_PATH)
-#
-#     if SAM3D_FOV_NAME:
-#         from tools.build_fov_estimator import FOVEstimator
-#         fov_estimator = FOVEstimator(name=SAM3D_FOV_NAME, device=device, path=SAM3D_FOV_PATH)
-#
-#     _estimator = SAM3DBodyEstimator(
-#         sam_3d_body_model=model,
-#         model_cfg=model_cfg,
-#         human_detector=human_detector,
-#         human_segmentor=human_segmentor,
-#         fov_estimator=fov_estimator,
-#     )
-#     return _estimator
-#
-#
-# def generate_sam3d_meshes(video_path: str, work_dir: str) -> Tuple[str, int, float]:
-#     """
-#     Run SAM3DBody on every frame and export per-frame OBJ meshes.
-#
-#     Returns (zip_path, frame_count, fps).
-#     """
-#     estimator = _get_estimator()
-#     faces = estimator.faces  # (F, 3) int ndarray
-#
-#     cap = cv2.VideoCapture(video_path)
-#     if not cap.isOpened():
-#         raise RuntimeError(f"Cannot open video: {video_path}")
-#
-#     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-#     n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-#
-#     obj_dir = os.path.join(work_dir, "objs")
-#     os.makedirs(obj_dir, exist_ok=True)
-#
-#     idx = 0
-#     while True:
-#         ret, frame_bgr = cap.read()
-#         if not ret:
-#             break
-#         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-#
-#         outputs = estimator.process_one_image(frame_rgb, bbox_thr=SAM3D_BBOX_THRESH, use_mask=False)
-#
-#         if len(outputs) > 0:
-#             verts = outputs[0].get("pred_vertices", outputs[0].get("vertices"))
-#             if verts is not None:
-#                 _write_obj(os.path.join(obj_dir, f"frame_{idx:04d}.obj"), verts, faces)
-#             else:
-#                 # Write an empty OBJ as placeholder
-#                 _write_obj(os.path.join(obj_dir, f"frame_{idx:04d}.obj"),
-#                            np.zeros((0, 3), dtype=np.float32),
-#                            np.zeros((0, 3), dtype=np.int32))
-#         else:
-#             _write_obj(os.path.join(obj_dir, f"frame_{idx:04d}.obj"),
-#                        np.zeros((0, 3), dtype=np.float32),
-#                        np.zeros((0, 3), dtype=np.int32))
-#         idx += 1
-#
-#     cap.release()
-#     actual_frames = idx
-#
-#     # meta.json
-#     meta = {"frame_count": actual_frames, "fps": fps}
-#     meta_path = os.path.join(obj_dir, "meta.json")
-#     with open(meta_path, "w") as f:
-#         json.dump(meta, f)
-#
-#     # zip everything
-#     zip_path = os.path.join(work_dir, "result.zip")
-#     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-#         for fname in sorted(os.listdir(obj_dir)):
-#             zf.write(os.path.join(obj_dir, fname), fname)
-#
-#     return zip_path, actual_frames, fps
+
+import sys
+import time
+import torch
+
+# Enable TensorFloat32 on Ampere+ GPUs (free ~10% speedup on matrix ops)
+torch.set_float32_matmul_precision("high")
+
+# ── Performance env vars (must be set before importing sam_3d_body) ──────────
+os.environ.setdefault("GPU_HAND_PREP", "1")                  # GPU hand preprocessing
+os.environ.setdefault("SKIP_KEYPOINT_PROMPT", "1")          # Skip slow keypoint prompt
+os.environ.setdefault("LAYER_DTYPE", "fp32")                 # fp32 (required for multi-person)
+os.environ.setdefault("USE_COMPILE", "1")                    # torch.compile
+os.environ.setdefault("USE_COMPILE_BACKBONE", "1")
+os.environ.setdefault("DECODER_COMPILE", "1")
+os.environ.setdefault("COMPILE_MODE", "reduce-overhead")
+os.environ.setdefault("COMPILE_WARMUP_BATCH_SIZES", "1")
+os.environ.setdefault("BODY_INTERM_PRED_LAYERS", "0,1,2")    # fewer layers = faster decoder
+os.environ.setdefault("HAND_INTERM_PRED_LAYERS", "0,1")
+os.environ.setdefault("KEYPOINT_PROMPT_INTERM_INTERVAL", "999")  # disable keypoint prompt
+os.environ.setdefault("MHR_NO_CORRECTIVES", "1")             # skip slow corrective blendshapes
+os.environ.setdefault("IMG_SIZE", "512")                     # backbone image size
+os.environ.setdefault("FOV_FAST", "1")                      # MoGe2 fast mode
+os.environ.setdefault("FOV_MODEL", "s")                     # MoGe2-s (35M, fastest)
+os.environ.setdefault("FOV_LEVEL", "0")                     # 1200 tokens (fewest)
+# Auto-enable TRT engines when built (run build_trt_engines.sh first)
+_FOV_TRT_ENGINE = os.path.expanduser("~/Fast-SAM-3D-Body/checkpoints/moge_trt/moge_dinov2_encoder_fp16.engine")
+if os.path.exists(_FOV_TRT_ENGINE):
+    os.environ.setdefault("FOV_TRT", "1")
+    print(f"[mesh_gen] FOV TRT engine found, enabling FOV_TRT=1")
+_YOLO_ENGINE = os.path.expanduser("~/Fast-SAM-3D-Body/checkpoints/yolo/yolo11m-pose.engine")
+_BACKBONE_TRT_ENGINE = os.path.expanduser(
+    "~/Fast-SAM-3D-Body/checkpoints/sam-3d-body-dinov3/backbone_trt/backbone_dinov3_fp16.engine"
+)
+if os.path.exists(_BACKBONE_TRT_ENGINE):
+    os.environ.setdefault("USE_TRT_BACKBONE", "1")
+    os.environ.setdefault("TRT_BACKBONE_PATH", _BACKBONE_TRT_ENGINE)
+    print(f"[mesh_gen] Backbone TRT engine found, enabling USE_TRT_BACKBONE=1")
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Switch between Fast-SAM-3D-Body (default) and original SAM3D via env var:
+#   USE_FAST_SAM3D=1  (default) -> ~/Fast-SAM-3D-Body
+#   USE_FAST_SAM3D=0            -> ~/sam-3d-body
+_use_fast = os.getenv("USE_FAST_SAM3D", "1") == "1"
+_sam3d_code_root = os.path.expanduser(
+    "~/Fast-SAM-3D-Body" if _use_fast else "~/sam-3d-body"
+)
+print(f"[mesh_gen] SAM3D backend: {'Fast-SAM-3D-Body' if _use_fast else 'sam-3d-body (original)'}")
+sys.path.insert(0, _sam3d_code_root)
+
+from sam_3d_body import load_sam_3d_body, SAM3DBodyEstimator
+from config import (
+    SAM3D_CHECKPOINT, SAM3D_MHR_PATH, SAM3D_DETECTOR_NAME,
+    SAM3D_DETECTOR_PATH, SAM3D_SEGMENTOR_NAME, SAM3D_SEGMENTOR_PATH,
+    SAM3D_FOV_NAME, SAM3D_FOV_PATH, SAM3D_BBOX_THRESH, SAM3D_YOLO_MODEL,
+)
+
+_estimator: SAM3DBodyEstimator | None = None
+
+
+def _get_estimator() -> SAM3DBodyEstimator:
+    global _estimator
+    if _estimator is not None:
+        return _estimator
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model, model_cfg = load_sam_3d_body(SAM3D_CHECKPOINT, device=device, mhr_path=SAM3D_MHR_PATH)
+
+    human_detector, human_segmentor, fov_estimator = None, None, None
+
+    if SAM3D_DETECTOR_NAME:
+        from tools.build_detector import HumanDetector
+        # Prefer compiled TRT engine for extra ~2x; falls back to .pt weights
+        yolo_model = _YOLO_ENGINE if os.path.exists(_YOLO_ENGINE) else SAM3D_YOLO_MODEL
+        print(f"[mesh_gen] YOLO model: {yolo_model}")
+        human_detector = HumanDetector(
+            name=SAM3D_DETECTOR_NAME,
+            device=device,
+            model=yolo_model,
+        )
+
+    if SAM3D_SEGMENTOR_NAME:
+        from tools.build_sam import HumanSegmentor
+        human_segmentor = HumanSegmentor(name=SAM3D_SEGMENTOR_NAME, device=device, path=SAM3D_SEGMENTOR_PATH)
+
+    if SAM3D_FOV_NAME:
+        from tools.build_fov_estimator import FOVEstimator
+        fov_estimator = FOVEstimator(name=SAM3D_FOV_NAME, device=device)
+
+    _estimator = SAM3DBodyEstimator(
+        sam_3d_body_model=model,
+        model_cfg=model_cfg,
+        human_detector=human_detector,
+        human_segmentor=human_segmentor,
+        fov_estimator=fov_estimator,
+    )
+    return _estimator
+
+
+def generate_sam3d_meshes(video_path: str, work_dir: str) -> Tuple[str, int, float]:
+    """
+    Run SAM3DBody on every frame and export per-frame OBJ meshes.
+
+    Returns (zip_path, frame_count, fps).
+    """
+    estimator = _get_estimator()
+    faces = estimator.faces  # (F, 3) int ndarray
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    obj_dir = os.path.join(work_dir, "objs")
+    os.makedirs(obj_dir, exist_ok=True)
+
+    _COMPILE_WARMUP_FRAMES = 3  # torch.compile finishes kernel compilation by frame 3
+    idx = 0
+    while True:
+        ret, frame_bgr = cap.read()
+        if not ret:
+            break
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+        t0 = time.perf_counter()
+        outputs = estimator.process_one_image(frame_rgb, bbox_thr=SAM3D_BBOX_THRESH, use_mask=False)
+        elapsed = time.perf_counter() - t0
+        if idx < _COMPILE_WARMUP_FRAMES:
+            print(f"[mesh_gen] frame {idx:04d}: {elapsed:.2f}s  (torch.compile warmup — will speed up)")
+        elif idx == _COMPILE_WARMUP_FRAMES:
+            print(f"[mesh_gen] frame {idx:04d}: {elapsed:.2f}s  ← torch.compile warmed up, full speed from here")
+        else:
+            print(f"[mesh_gen] frame {idx:04d}: {elapsed:.2f}s")
+
+        if len(outputs) > 0:
+            # Pick the detection whose bounding-box center is closest to the
+            # image center (there should always be exactly one person, but
+            # just in case the detector fires on background figures).
+            img_cy, img_cx = frame_rgb.shape[0] / 2.0, frame_rgb.shape[1] / 2.0
+            best = min(
+                outputs,
+                key=lambda o: (
+                    ((o["bbox"][0] + o["bbox"][2]) / 2.0 - img_cx) ** 2
+                    + ((o["bbox"][1] + o["bbox"][3]) / 2.0 - img_cy) ** 2
+                )
+                if o.get("bbox") is not None
+                else float("inf"),
+            )
+            verts = best.get("pred_vertices", best.get("vertices"))
+            if verts is not None:
+                _write_obj(os.path.join(obj_dir, f"frame_{idx:04d}.obj"), verts, faces)
+            else:
+                # Write an empty OBJ as placeholder
+                _write_obj(os.path.join(obj_dir, f"frame_{idx:04d}.obj"),
+                           np.zeros((0, 3), dtype=np.float32),
+                           np.zeros((0, 3), dtype=np.int32))
+        else:
+            _write_obj(os.path.join(obj_dir, f"frame_{idx:04d}.obj"),
+                       np.zeros((0, 3), dtype=np.float32),
+                       np.zeros((0, 3), dtype=np.int32))
+        idx += 1
+
+    cap.release()
+    actual_frames = idx
+
+    # meta.json
+    meta = {"frame_count": actual_frames, "fps": fps}
+    meta_path = os.path.join(obj_dir, "meta.json")
+    with open(meta_path, "w") as f:
+        json.dump(meta, f)
+
+    # zip everything
+    zip_path = os.path.join(work_dir, "result.zip")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fname in sorted(os.listdir(obj_dir)):
+            zf.write(os.path.join(obj_dir, fname), fname)
+
+    return zip_path, actual_frames, fps

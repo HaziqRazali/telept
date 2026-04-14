@@ -54,10 +54,10 @@ if ! command -v conda &>/dev/null; then
     exit 1
 fi
 
-for tool in curl unzip git; do
+for tool in curl unzip git clang ninja-build; do
     if ! command -v "$tool" &>/dev/null; then
-        echo "[ERROR] '$tool' not found. Install it with: sudo apt-get install $tool"
-        exit 1
+        echo "  '$tool' not found – attempting install via apt..."
+        sudo apt-get install -y "$tool" || { echo "[ERROR] Failed to install '$tool'. Aborting."; exit 1; }
     fi
 done
 
@@ -186,7 +186,8 @@ echo "  Installing SDK components..."
     "build-tools;35.0.0" \
     "build-tools;28.0.3" \
     "platforms;android-35" \
-    "ndk;28.2.13433566" \
+    "platforms;android-36" \
+    "ndk;28.2.13676358" \
     "cmake;3.22.1"
 
 echo "  Android SDK components installed."

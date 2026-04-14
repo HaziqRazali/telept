@@ -29,46 +29,76 @@ class MeshViewer extends StatefulWidget {
 }
 
 class _MeshViewerState extends State<MeshViewer> {
-  // Camera orbit angles
-  double _rotX = 0.15; // slight tilt
-  double _rotY = 0.0;
-  double _zoom = 1.0;
+  // Default orientation: π around X flips SAM3DBody's Y-down/Z-away frame
+  // so the person appears right-side-up and front-facing.
+  static const double _defaultRotX = math.pi;
+  static const double _defaultRotY = 0.0;
+  static const double _defaultZoom = 1.0;
+
+  double _rotX = _defaultRotX;
+  double _rotY = _defaultRotY;
+  double _zoom = _defaultZoom;
 
   Offset? _lastFocalPoint;
   double _baseZoom = 1.0;
 
+  void _resetOrientation() {
+    setState(() {
+      _rotX = _defaultRotX;
+      _rotY = _defaultRotY;
+      _zoom = _defaultZoom;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onScaleStart: (d) {
-        _lastFocalPoint = d.localFocalPoint;
-        _baseZoom = _zoom;
-      },
-      onScaleUpdate: (d) {
-        setState(() {
-          // Orbit from focal point delta
-          if (_lastFocalPoint != null) {
-            final dx = d.localFocalPoint.dx - _lastFocalPoint!.dx;
-            final dy = d.localFocalPoint.dy - _lastFocalPoint!.dy;
-            _rotY += dx * 0.01;
-            _rotX += dy * 0.01;
-            _rotX = _rotX.clamp(-math.pi / 2, math.pi / 2);
-          }
-          _lastFocalPoint = d.localFocalPoint;
-          // Pinch zoom
-          _zoom = (_baseZoom * d.scale).clamp(0.2, 5.0);
-        });
-      },
-      onScaleEnd: (_) => _lastFocalPoint = null,
-      child: CustomPaint(
-        painter: _MeshPainter(
-          frame: widget.frame,
-          rotX: _rotX,
-          rotY: _rotY,
-          zoom: _zoom,
+    return Stack(
+      children: [
+        GestureDetector(
+          onScaleStart: (d) {
+            _lastFocalPoint = d.localFocalPoint;
+            _baseZoom = _zoom;
+          },
+          onScaleUpdate: (d) {
+            setState(() {
+              // Orbit from focal point delta
+              if (_lastFocalPoint != null) {
+                final dx = d.localFocalPoint.dx - _lastFocalPoint!.dx;
+                final dy = d.localFocalPoint.dy - _lastFocalPoint!.dy;
+                _rotY += dx * 0.01;
+                _rotX += dy * 0.01;
+                // No clamp — allow full 360° rotation in all axes
+              }
+              _lastFocalPoint = d.localFocalPoint;
+              // Pinch zoom
+              _zoom = (_baseZoom * d.scale).clamp(0.2, 5.0);
+            });
+          },
+          onScaleEnd: (_) => _lastFocalPoint = null,
+          child: CustomPaint(
+            painter: _MeshPainter(
+              frame: widget.frame,
+              rotX: _rotX,
+              rotY: _rotY,
+              zoom: _zoom,
+            ),
+            size: Size.infinite,
+          ),
         ),
-        size: Size.infinite,
-      ),
+        // Reset orientation button
+        Positioned(
+          top: 8,
+          right: 8,
+          child: IconButton(
+            onPressed: _resetOrientation,
+            icon: const Icon(Icons.crop_rotate, color: Colors.white70),
+            tooltip: 'Reset orientation',
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.black38,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
