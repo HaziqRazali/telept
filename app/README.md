@@ -57,6 +57,89 @@ python main.py
 
 ---
 
+## Setting up on a fresh machine
+
+These steps cover everything: running the GPU server **and** building/deploying the Flutter app to a connected phone.
+
+### Step 1 — Clone the repo
+
+```bash
+git clone https://github.com/HaziqRazali/telept.git
+cd telept/app
+```
+
+### Step 2 — Install the Flutter + Android dev environment
+
+Creates the `tele_pt` conda env (Python 3.11 + Java 17), downloads Flutter 3.41.6, Android SDK, and sets up all env vars automatically on `conda activate`.
+
+```bash
+bash install_flutter_dev.sh
+```
+
+### Step 3 — Install the GPU server environment
+
+Creates the `telept_server` conda env with PyTorch (CUDA), SAM3DBody, FastAPI, OpenCV, etc.
+
+```bash
+bash server/install_gpu_server.sh
+```
+
+> For CUDA 12.x: `CUDA_VERSION=121 bash server/install_gpu_server.sh`
+
+### Step 4 — Set up USB udev rules (one-time, requires sudo)
+
+So Linux recognises the Android phone over USB.
+
+```bash
+sudo bash setup_udev.sh
+```
+
+### Step 5 — Enable USB Debugging on the phone
+
+**Settings → About phone → tap Build number 7×** → back → **Developer Options → USB Debugging → ON**
+
+Plug in the phone, then verify:
+```bash
+conda activate tele_pt
+adb devices   # should list your phone's serial number
+# If empty: accept the "Allow USB debugging?" dialog on the phone screen
+```
+
+### Step 6 — Deploy the app to the phone
+
+```bash
+conda activate tele_pt
+./run_flutter.sh run
+# Builds, installs, and launches the app on the connected phone
+```
+
+### Step 7 — Start the server
+
+Open a second terminal:
+
+```bash
+conda activate telept_server
+cd server
+python main.py
+# Listening on http://0.0.0.0:8000
+```
+
+Find the IP to enter in the app:
+```bash
+hostname -I | awk '{print $1}'
+```
+
+### Step 8 — Configure the server URL in the app
+
+On the phone, tap the **⚙ gear icon** (top-right of home screen) → enter `http://<server-ip>:8000` → **Save**.
+This is persisted — you only need to do it once.
+
+---
+
+> **Steps 2, 3, 4 are one-time only.** After that, daily use is just Steps 6 and 7.
+
+---
+
 ## Server IP — do you need to know it?
 
 **Short answer: yes, once.** Both devices must be on the same Wi-Fi. You do *not* need to recompile the app — the server URL is configurable at runtime:
