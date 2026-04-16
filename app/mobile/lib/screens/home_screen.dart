@@ -160,29 +160,54 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showServerSettings(BuildContext context) async {
-    final controller =
-        TextEditingController(text: AppConfig.serverUrl);
+    final serverController = TextEditingController(text: AppConfig.serverUrl);
+    final geminiController = TextEditingController(text: AppConfig.geminiApiKey);
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Server URL'),
+        title: const Text('Settings'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Enter the IP address of the GPU server.\n'
-              'Both devices must be on the same Wi-Fi.',
-              style: TextStyle(fontSize: 13),
+              'GPU Server URL',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 4),
+            const Text(
+              'Both devices must be on the same Wi-Fi.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
             TextField(
-              controller: controller,
+              controller: serverController,
               autocorrect: false,
               keyboardType: TextInputType.url,
               decoration: const InputDecoration(
                 labelText: 'Server URL',
                 hintText: 'http://192.168.x.x:8000',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Gemini API Key',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Get a free key at aistudio.google.com',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: geminiController,
+              autocorrect: false,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Gemini API Key',
+                hintText: 'AIza...',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -195,16 +220,18 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           FilledButton(
             onPressed: () async {
-              await AppConfig.setServerUrl(controller.text.trim());
+              await AppConfig.setServerUrl(serverController.text.trim());
+              await AppConfig.setGeminiApiKey(geminiController.text.trim());
               if (ctx.mounted) Navigator.pop(ctx);
-              _showSnack('Server URL saved: ${AppConfig.serverUrl}');
+              _showSnack('Settings saved');
             },
             child: const Text('Save'),
           ),
         ],
       ),
     );
-    controller.dispose();
+    serverController.dispose();
+    geminiController.dispose();
   }
 
   @override

@@ -7,6 +7,7 @@ class AppConfig {
   AppConfig._();
 
   static const String _kServerUrl = 'server_url';
+  static const String _kGeminiApiKey = 'gemini_api_key';
 
   /// Fallback URL compiled into the app. Edit this if you always use the same
   /// server and don't want to configure it on first launch.
@@ -14,9 +15,12 @@ class AppConfig {
 
   // Runtime-mutable – changed via the in-app settings dialog.
   static String _serverUrl = defaultServerUrl;
+  static String _geminiApiKey = '';
 
   /// Current server base URL (stored in SharedPreferences).
   static String get serverUrl => _serverUrl;
+  static String get geminiApiKey => _geminiApiKey;
+  static bool get hasGeminiKey => _geminiApiKey.isNotEmpty;
 
   static String get processEndpoint => '$_serverUrl/process';
   static String get healthEndpoint => '$_serverUrl/health';
@@ -25,6 +29,7 @@ class AppConfig {
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _serverUrl = prefs.getString(_kServerUrl) ?? defaultServerUrl;
+    _geminiApiKey = prefs.getString(_kGeminiApiKey) ?? '';
   }
 
   /// Persist a new server URL. Takes effect immediately.
@@ -32,6 +37,13 @@ class AppConfig {
     _serverUrl = url.trimRight().replaceAll(RegExp(r'/+$'), '');
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kServerUrl, _serverUrl);
+  }
+
+  /// Persist a new Gemini API key. Takes effect immediately.
+  static Future<void> setGeminiApiKey(String key) async {
+    _geminiApiKey = key.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kGeminiApiKey, _geminiApiKey);
   }
 
   /// Upload / processing timeout (large videos can take a while).

@@ -5,9 +5,10 @@ import 'package:video_player/video_player.dart';
 
 import '../services/api_service.dart';
 import '../widgets/mesh_viewer.dart';
+import '../widgets/chat_panel.dart';
 
-/// Full-screen viewer: video on the left, 3D mesh on the right.
-/// Single slim control bar at the bottom — maximum viewing space.
+/// Full-screen viewer with a left icon-rail sidebar to show / hide three panels:
+/// (1) Video playback  (2) 3D mesh  (3) Gemini chatbot
 class ViewerScreen extends StatefulWidget {
   final ProcessingResult result;
   final String videoPath;
@@ -24,6 +25,36 @@ class ViewerScreen extends StatefulWidget {
 
 class _ViewerScreenState extends State<ViewerScreen>
     with SingleTickerProviderStateMixin {
+  // ── Panel visibility ────────────────────────────────────────────────
+  bool _showVideo = true;
+  bool _showMesh = true;
+  bool _showChat = false;
+
+  int get _visibleCount =>
+      (_showVideo ? 1 : 0) + (_showMesh ? 1 : 0) + (_showChat ? 1 : 0);
+
+  void _toggle(String panel) {
+    setState(() {
+      final wouldHide = switch (panel) {
+        'video' => _showVideo,
+        'mesh' => _showMesh,
+        'chat' => _showChat,
+        _ => false,
+      };
+      // Don't allow hiding the last visible panel
+      if (wouldHide && _visibleCount <= 1) return;
+      switch (panel) {
+        case 'video':
+          _showVideo = !_showVideo;
+        case 'mesh':
+          _showMesh = !_showMesh;
+        case 'chat':
+          _showChat = !_showChat;
+      }
+    });
+  }
+
+  // ── Playback ────────────────────────────────────────────────────────
   int _currentFrame = 0;
   bool _isPlaying = false;
   late AnimationController _playController;
@@ -57,7 +88,6 @@ class _ViewerScreenState extends State<ViewerScreen>
     if (frame != _currentFrame) {
       setState(() => _currentFrame = frame.clamp(0, _totalFrames - 1));
     }
-    // Keep video in sync with mesh timeline
     if (_videoInitialized) {
       final videoMs = (_playController.value *
               _videoController.value.duration.inMilliseconds)
@@ -117,52 +147,69 @@ class _ViewerScreenState extends State<ViewerScreen>
       body: SafeArea(
         child: Column(
           children: [
-            // ── Split view ──────────────────────────────────────────────
+            // ── Main area ──────────────────────────────────────────────
             Expanded(
               child: Row(
                 children: [
-                  // Left: video playback
-                  Expanded(
-                    child: _videoInitialized
-                        ? Center(
-                            child: AspectRatio(
-                              aspectRatio: _videoController.value.aspectRatio,
-                              child: VideoPlayer(_videoController),
-                            ),
-                          )
-                        : const Center(
-                            child: CircularProgressIndicator(
-                              color: Colors.white54,
-                            ),
-                          ),
+                  // ── Left icon rail ─────────────────────────────────
+                  _SideRail(
+                    showVideo: _showVideo,
+                    showMesh: _showMesh,
+                    showChat: _showChat,
+                    onToggle: _toggle,
                   ),
 
-                  // Thin divider
                   Container(width: 1, color: Colors.white12),
 
-                  // Right: 3D mesh viewer
+                  // ── Panel area ─────────────────────────────────────
                   Expanded(
-                    child: MeshViewer(frame: frame),
+                    child: Row(
+                      children: [
+                        if (_showVideo) ...[
+                          Expanded(
+                            child: _videoInitialized
+                                ? Center(
+                                    child: AspectRatio(
+                                      aspectRatio:
+                                          _videoController.value.aspectRatio,
+                                      child: VideoPlayer(_videoController),
+                                    ),
+                                  )
+                                : const Center(
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white54),
+                                  ),
+                          ),
+                          if (_showMesh || _showChat)
+                            Container(width: 1, color: Colors.white12),
+                        ],
+                        if (_showMesh) ...[
+                          Expanded(child: MeshViewer(frame: frame)),
+                          if (_showChat)
+                            Container(width: 1, color: Colors.white12),
+                        ],
+                        if (_showChat)
+                          const Expanded(child: ChatPanel()),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
 
-            // ── Bottom controls ─────────────────────────────────────────
+            // ── Bottom controls ────────────────────────────────────────
             Container(
               color: Colors.black87,
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
               child: Row(
                 children: [
-                  // Back
                   IconButton(
                     icon: const Icon(Icons.arrow_back,
                         color: Colors.white70, size: 22),
                     onPressed: () => Navigator.pop(context),
                     tooltip: 'Back',
                   ),
-
-                  // Play / Pause
                   IconButton(
                     icon: Icon(
                       _isPlaying ? Icons.pause : Icons.play_arrow,
@@ -171,8 +218,6 @@ class _ViewerScreenState extends State<ViewerScreen>
                     ),
                     onPressed: _totalFrames > 1 ? _togglePlayback : null,
                   ),
-
-                  // Scrub slider
                   Expanded(
                     child: SliderTheme(
                       data: SliderTheme.of(context).copyWith(
@@ -186,7 +231,8 @@ class _ViewerScreenState extends State<ViewerScreen>
                         value: _currentFrame.toDouble(),
                         min: 0,
                         max: (_totalFrames - 1).toDouble(),
-                        divisions: _totalFrames > 1 ? _totalFrames - 1 : 1,
+                        divisions:
+                            _totalFrames > 1 ? _totalFrames - 1 : 1,
                         onChanged: (v) => _seekToFrame(v.round()),
                       ),
                     ),
@@ -201,3 +247,98 @@ class _ViewerScreenState extends State<ViewerScreen>
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Sidebar icon rail
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SideRail extends StatelessWidget {
+  final bool showVideo;
+  final bool showMesh;
+  final bool showChat;
+  final void Function(String) onToggle;
+
+  const _SideRail({
+    required this.showVideo,
+    required this.showMesh,
+    required this.showChat,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 48,
+      color: Colors.grey[900],
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _RailButton(
+            icon: Icons.videocam,
+            label: 'Video',
+            active: showVideo,
+            activeColor: Colors.blue[300]!,
+            onTap: () => onToggle('video'),
+          ),
+          const SizedBox(height: 8),
+          _RailButton(
+            icon: Icons.view_in_ar,
+            label: 'Mesh',
+            active: showMesh,
+            activeColor: Colors.green[300]!,
+            onTap: () => onToggle('mesh'),
+          ),
+          const SizedBox(height: 8),
+          _RailButton(
+            icon: Icons.chat_bubble_outline,
+            label: 'Chat',
+            active: showChat,
+            activeColor: Colors.purple[300]!,
+            onTap: () => onToggle('chat'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RailButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool active;
+  final Color activeColor;
+  final VoidCallback onTap;
+
+  const _RailButton({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.activeColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      preferBelow: false,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: active ? activeColor.withValues(alpha: 0.15) : Colors.transparent,
+          ),
+          child: Icon(
+            icon,
+            size: 22,
+            color: active ? activeColor : Colors.white30,
+          ),
+        ),
+      ),
+    );
+  }
+}
