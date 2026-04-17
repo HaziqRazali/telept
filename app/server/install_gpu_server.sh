@@ -106,11 +106,10 @@ cd "$SCRIPT_DIR"
 echo ""
 echo "[4/6] Installing MHR + body model dependencies..."
 
-pip install \
-    smplx \
-    chumpy \
-    pyrender \
-    pyopengl
+pip install smplx pyrender pyopengl
+# chumpy's setup.py does "import pip" which breaks in isolated build envs;
+# --no-build-isolation bypasses that.
+pip install --no-build-isolation chumpy
 
 # ---------------------------------------------------------------------------
 # 6. Install server-specific dependencies

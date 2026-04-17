@@ -169,13 +169,18 @@ def _get_estimator() -> SAM3DBodyEstimator:
 
     if SAM3D_DETECTOR_NAME:
         from tools.build_detector import HumanDetector
-        # Prefer compiled TRT engine for extra ~2x; falls back to .pt weights
-        yolo_model = _YOLO_ENGINE if os.path.exists(_YOLO_ENGINE) else SAM3D_YOLO_MODEL
-        print(f"[mesh_gen] YOLO model: {yolo_model}")
+        detector_kwargs = {}
+        if SAM3D_DETECTOR_NAME == "yolo_pose":
+            # Prefer compiled TRT engine for extra ~2x; falls back to .pt weights
+            yolo_model = _YOLO_ENGINE if os.path.exists(_YOLO_ENGINE) else SAM3D_YOLO_MODEL
+            print(f"[mesh_gen] YOLO model: {yolo_model}")
+            detector_kwargs["model"] = yolo_model
+        elif SAM3D_DETECTOR_PATH:
+            detector_kwargs["path"] = SAM3D_DETECTOR_PATH
         human_detector = HumanDetector(
             name=SAM3D_DETECTOR_NAME,
             device=device,
-            model=yolo_model,
+            **detector_kwargs,
         )
 
     if SAM3D_SEGMENTOR_NAME:

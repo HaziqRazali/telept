@@ -18,7 +18,7 @@ SAM3D_CHECKPOINT = os.getenv(
 SAM3D_MHR_PATH = os.getenv("SAM3D_MHR_PATH", os.path.expanduser("~/MHR/assets/mhr_model.pt"))
 # YOLO-Pose detector (auto-downloaded from ultralytics hub on first run)
 # Will be compiled to .engine by build_trt_engines.sh for extra ~2x speedup
-SAM3D_DETECTOR_NAME = os.getenv("SAM3D_DETECTOR_NAME", "yolo_pose")
+SAM3D_DETECTOR_NAME = os.getenv("SAM3D_DETECTOR_NAME", "vitdet")
 SAM3D_DETECTOR_PATH = os.getenv("SAM3D_DETECTOR_PATH", "")
 SAM3D_YOLO_MODEL = os.getenv(
     "SAM3D_YOLO_MODEL",
