@@ -61,7 +61,7 @@ class ApiService {
     final uploadResponse = await _dio.post(
       AppConfig.processEndpoint,
       data: formData,
-      options: Options(responseType: ResponseType.json),
+      options: Options(responseType: ResponseType.bytes),
       onSendProgress: (sent, total) {
         if (total > 0 && onProgress != null) {
           onProgress((sent / total) * 0.5);
@@ -76,7 +76,8 @@ class ApiService {
       );
     }
 
-    final jobId = (uploadResponse.data as Map<String, dynamic>)['job_id'] as String;
+    final uploadBody = json.decode(utf8.decode(uploadResponse.data as List<int>)) as Map<String, dynamic>;
+    final jobId = uploadBody['job_id'] as String;
 
     // --- 2. Poll progress (50% → 99%) ----------------------------------
     while (true) {
@@ -84,9 +85,9 @@ class ApiService {
 
       final progResponse = await _dio.get(
         AppConfig.progressEndpoint(jobId),
-        options: Options(responseType: ResponseType.json),
+        options: Options(responseType: ResponseType.bytes),
       );
-      final body = progResponse.data as Map<String, dynamic>;
+      final body = json.decode(utf8.decode(progResponse.data as List<int>)) as Map<String, dynamic>;
       final status = body['status'] as String;
 
       if (status == 'error') {
