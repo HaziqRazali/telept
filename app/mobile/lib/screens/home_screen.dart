@@ -230,8 +230,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
-    serverController.dispose();
-    geminiController.dispose();
+    // Controllers are intentionally not disposed here: showDialog resolves
+    // when pop() is called, but the close animation is still running at that
+    // point. Disposing now would crash any TextField rebuild during the
+    // animation. They will be GC-collected once they go out of scope.
   }
 
   @override
