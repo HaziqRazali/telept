@@ -47,12 +47,20 @@ app/
 conda activate tele_pt
 
 # 2. Start the app on the connected phone (USB)
-/data/telept/app/run_flutter.sh run
+/home/haziq/telept/app/run_flutter.sh run
 
-# 3. In a separate terminal, start the stub server (no GPU needed)
-conda activate tele_pt
-cd /data/telept/app/server
-python main.py
+# 3a. In a separate terminal, start the stub server (no GPU needed)
+conda activate telept_server
+cd /home/haziq/telept/app/server
+uvicorn main:app --host 0.0.0.0 --port 8000
+
+# 3b. OR start with real SAM3DBody (GPU required)
+conda activate telept_server
+cd /home/haziq/telept/app/server
+USE_SAM3D=1 \
+SAM3D_CHECKPOINT=/home/haziq/sam-3d-body/checkpoints/sam-3d-body-dinov3/model.ckpt \
+SAM3D_MHR_PATH=/home/haziq/MHR/assets/mhr_model.pt \
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 ---
@@ -118,9 +126,18 @@ conda activate tele_pt
 Open a second terminal:
 
 ```bash
+# Stub mode (no GPU needed)
 conda activate telept_server
-cd server
-python main.py
+cd /home/haziq/telept/app/server
+uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Real SAM3DBody mode (GPU required)
+conda activate telept_server
+cd /home/haziq/telept/app/server
+USE_SAM3D=1 \
+SAM3D_CHECKPOINT=/home/haziq/sam-3d-body/checkpoints/sam-3d-body-dinov3/model.ckpt \
+SAM3D_MHR_PATH=/home/haziq/MHR/assets/mhr_model.pt \
+uvicorn main:app --host 0.0.0.0 --port 8000
 # Listening on http://0.0.0.0:8000
 ```
 
@@ -344,9 +361,9 @@ bash server/install_gpu_server.sh
 The server returns a rest-pose icosphere for every frame by default. This lets you test the full pipeline without a GPU:
 
 ```bash
-conda activate tele_pt      # or telept_server on the GPU machine
-cd /data/telept/app/server
-python main.py
+conda activate telept_server
+cd /home/haziq/telept/app/server
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 Verify:
@@ -366,11 +383,11 @@ When SAM3DBody is installed and you have a GPU:
 
 ```bash
 conda activate telept_server
-cd /data/telept/app/server
+cd /home/haziq/telept/app/server
 USE_SAM3D=1 \
-SAM3D_CHECKPOINT=/home/haziq/sam-3d-body/checkpoints/sam-3d-body-dinov3 \
-SAM3D_MHR_PATH=/home/haziq/MHR \
-python main.py
+SAM3D_CHECKPOINT=/home/haziq/sam-3d-body/checkpoints/sam-3d-body-dinov3/model.ckpt \
+SAM3D_MHR_PATH=/home/haziq/MHR/assets/mhr_model.pt \
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 ### Server configuration
