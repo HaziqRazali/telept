@@ -46,34 +46,82 @@ class ApiService {
 
   /// Upload [videoPath] to the server and return parsed mesh frames.
   ///
-  /// [onProgress] reports upload progress as a value between 0.0 and 1.0.
+  /// [onProgress] is called with values 0.0–1.0:
+  ///   - 0.0–0.5: upload progress
+  ///   - 0.5–1.0: server-side frame processing progress
   Future<ProcessingResult> processVideo(
     String videoPath, {
     void Function(double progress)? onProgress,
   }) async {
+    // --- 1. Upload video (0% → 50%) ------------------------------------
     final formData = FormData.fromMap({
       'video': await MultipartFile.fromFile(videoPath, filename: 'recording.mp4'),
     });
 
-    final response = await _dio.post(
+    final uploadResponse = await _dio.post(
       AppConfig.processEndpoint,
       data: formData,
+      options: Options(responseType: ResponseType.json),
       onSendProgress: (sent, total) {
         if (total > 0 && onProgress != null) {
-          onProgress(sent / total);
+          onProgress((sent / total) * 0.5);
         }
       },
     );
 
-    if (response.statusCode != 200) {
+    if (uploadResponse.statusCode != 200) {
       throw ApiException(
-        'Server returned status ${response.statusCode}',
-        statusCode: response.statusCode,
+        'Server returned status ${uploadResponse.statusCode}',
+        statusCode: uploadResponse.statusCode,
       );
     }
 
-    // Response body is a ZIP file in bytes
-    final Uint8List zipBytes = Uint8List.fromList(response.data as List<int>);
+    final jobId = (uploadResponse.data as Map<String, dynamic>)['job_id'] as String;
+
+    // --- 2. Poll progress (50% → 99%) ----------------------------------
+    while (true) {
+      await Future.delayed(const Duration(milliseconds: 600));
+
+      final progResponse = await _dio.get(
+        AppConfig.progressEndpoint(jobId),
+        options: Options(responseType: ResponseType.json),
+      );
+      final body = progResponse.data as Map<String, dynamic>;
+      final status = body['status'] as String;
+
+      if (status == 'error') {
+        throw ApiException(body['error'] as String? ?? 'Server processing failed');
+      }
+
+      if (status == 'processing') {
+        final done = (body['frames_done'] as num).toInt();
+        final total = (body['total_frames'] as num).toInt();
+        if (total > 0 && onProgress != null) {
+          onProgress(0.5 + (done / total) * 0.49);
+        }
+      }
+
+      if (status == 'done') {
+        onProgress?.call(0.99);
+        break;
+      }
+    }
+
+    // --- 3. Fetch result ZIP ------------------------------------------
+    final resultResponse = await _dio.get(
+      AppConfig.resultEndpoint(jobId),
+      options: Options(responseType: ResponseType.bytes),
+    );
+
+    if (resultResponse.statusCode != 200) {
+      throw ApiException(
+        'Server returned status ${resultResponse.statusCode}',
+        statusCode: resultResponse.statusCode,
+      );
+    }
+
+    final Uint8List zipBytes = Uint8List.fromList(resultResponse.data as List<int>);
+    onProgress?.call(1.0);
     return _parseZipResponse(zipBytes);
   }
 

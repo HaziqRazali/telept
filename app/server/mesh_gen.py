@@ -14,7 +14,7 @@ import shutil
 import tempfile
 import zipfile
 from io import BytesIO
-from typing import List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -54,7 +54,11 @@ def _write_obj(path: str, vertices: np.ndarray, faces: np.ndarray) -> None:
             f.write(f"f {face[0]+1} {face[1]+1} {face[2]+1}\n")
 
 
-def generate_stub_meshes(video_path: str, work_dir: str) -> Tuple[str, int, float]:
+def generate_stub_meshes(
+    video_path: str,
+    work_dir: str,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> Tuple[str, int, float]:
     """
     Generate a rest-pose icosphere for every frame of the input video.
 
@@ -76,8 +80,12 @@ def generate_stub_meshes(video_path: str, work_dir: str) -> Tuple[str, int, floa
     obj_dir = os.path.join(work_dir, "objs")
     os.makedirs(obj_dir, exist_ok=True)
 
+    if progress_callback:
+        progress_callback(0, n_frames)
     for i in range(n_frames):
         _write_obj(os.path.join(obj_dir, f"frame_{i:04d}.obj"), verts, faces)
+        if progress_callback:
+            progress_callback(i + 1, n_frames)
 
     # meta.json
     meta = {"frame_count": n_frames, "fps": fps}
@@ -201,7 +209,11 @@ def _get_estimator() -> SAM3DBodyEstimator:
     return _estimator
 
 
-def generate_sam3d_meshes(video_path: str, work_dir: str) -> Tuple[str, int, float]:
+def generate_sam3d_meshes(
+    video_path: str,
+    work_dir: str,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> Tuple[str, int, float]:
     """
     Run SAM3DBody on every frame and export per-frame OBJ meshes.
 
@@ -219,6 +231,9 @@ def generate_sam3d_meshes(video_path: str, work_dir: str) -> Tuple[str, int, flo
 
     obj_dir = os.path.join(work_dir, "objs")
     os.makedirs(obj_dir, exist_ok=True)
+
+    if progress_callback:
+        progress_callback(0, n_frames)
 
     _COMPILE_WARMUP_FRAMES = 3  # torch.compile finishes kernel compilation by frame 3
     idx = 0
@@ -265,6 +280,8 @@ def generate_sam3d_meshes(video_path: str, work_dir: str) -> Tuple[str, int, flo
                        np.zeros((0, 3), dtype=np.float32),
                        np.zeros((0, 3), dtype=np.int32))
         idx += 1
+        if progress_callback:
+            progress_callback(idx, n_frames)
 
     cap.release()
     actual_frames = idx

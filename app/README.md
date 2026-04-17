@@ -60,6 +60,7 @@ cd /home/haziq/telept/app/server
 USE_SAM3D=1 \
 SAM3D_CHECKPOINT=/home/haziq/sam-3d-body/checkpoints/sam-3d-body-dinov3/model.ckpt \
 SAM3D_MHR_PATH=/home/haziq/MHR/assets/mhr_model.pt \
+SAM3D_DETECTOR_NAME=yolo_pose \
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 

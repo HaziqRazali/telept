@@ -15,18 +15,26 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from config import HOST, MAX_UPLOAD_SIZE_MB, PORT, TEMP_DIR, USE_SAM3D
 from mesh_gen import generate_stub_meshes, generate_sam3d_meshes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sam3d_server")
+
+# ---------------------------------------------------------------------------
+# In-memory job store  {job_id: {"status": ..., "frames_done": int, "total_frames": int, ...}}
+# ---------------------------------------------------------------------------
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +75,7 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
-# POST /process  –  accept video, return ZIP of OBJ meshes
+# POST /process  –  accept video, kick off background job, return job_id
 # ---------------------------------------------------------------------------
 @app.post("/process")
 async def process_video(video: UploadFile = File(...)):
@@ -75,53 +83,127 @@ async def process_video(video: UploadFile = File(...)):
     if video.content_type and not video.content_type.startswith("video/"):
         raise HTTPException(status_code=400, detail=f"Expected a video file, got {video.content_type}")
 
-    # Create a unique working directory
+    # Create a unique working directory and job id
+    job_id = uuid.uuid4().hex
     work_dir = tempfile.mkdtemp(dir=TEMP_DIR)
     video_path = os.path.join(work_dir, video.filename or "upload.mp4")
 
+    # --- save uploaded video to disk -------------------------------------
     try:
-        # --- save uploaded video to disk ---------------------------------
         total_bytes = 0
         max_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
         with open(video_path, "wb") as f:
             while chunk := await video.read(1024 * 1024):  # 1 MB chunks
                 total_bytes += len(chunk)
                 if total_bytes > max_bytes:
+                    shutil.rmtree(work_dir, ignore_errors=True)
                     raise HTTPException(
                         status_code=413,
                         detail=f"File too large (max {MAX_UPLOAD_SIZE_MB} MB)",
                     )
                 f.write(chunk)
-
-        logger.info("Received %s (%.1f MB)", video.filename, total_bytes / 1e6)
-
-        # --- run mesh generation -----------------------------------------
-        t0 = time.time()
-
-        if USE_SAM3D:
-            zip_path, n_frames, fps = generate_sam3d_meshes(video_path, work_dir)
-        else:
-            zip_path, n_frames, fps = generate_stub_meshes(video_path, work_dir)
-
-        elapsed = time.time() - t0
-        logger.info("Generated %d frames @ %.1f fps in %.2fs", n_frames, fps, elapsed)
-
-        # --- return ZIP --------------------------------------------------
-        return FileResponse(
-            path=zip_path,
-            media_type="application/zip",
-            filename="meshes.zip",
-            # Cleanup the work dir once the response is sent
-            background=_cleanup_task(work_dir),
-        )
-
     except HTTPException:
-        shutil.rmtree(work_dir, ignore_errors=True)
         raise
     except Exception as exc:
         shutil.rmtree(work_dir, ignore_errors=True)
-        logger.exception("Processing failed")
         raise HTTPException(status_code=500, detail=str(exc))
+
+    logger.info("Received %s (%.1f MB) → job %s", video.filename, total_bytes / 1e6, job_id)
+
+    # Register job
+    with _jobs_lock:
+        _jobs[job_id] = {
+            "status": "processing",
+            "frames_done": 0,
+            "total_frames": 0,
+            "work_dir": work_dir,
+            "zip_path": None,
+            "error": None,
+        }
+
+    # --- launch background processing thread -----------------------------
+    def _run():
+        try:
+            def _progress(frames_done: int, total_frames: int):
+                with _jobs_lock:
+                    _jobs[job_id]["frames_done"] = frames_done
+                    _jobs[job_id]["total_frames"] = total_frames
+
+            t0 = time.time()
+            if USE_SAM3D:
+                zip_path, n_frames, fps = generate_sam3d_meshes(
+                    video_path, work_dir, progress_callback=_progress
+                )
+            else:
+                zip_path, n_frames, fps = generate_stub_meshes(
+                    video_path, work_dir, progress_callback=_progress
+                )
+            elapsed = time.time() - t0
+            logger.info("Job %s: %d frames @ %.1f fps in %.2fs", job_id, n_frames, fps, elapsed)
+
+            with _jobs_lock:
+                _jobs[job_id]["status"] = "done"
+                _jobs[job_id]["zip_path"] = zip_path
+                _jobs[job_id]["frames_done"] = n_frames
+                _jobs[job_id]["total_frames"] = n_frames
+        except Exception as exc:
+            logger.exception("Job %s failed", job_id)
+            with _jobs_lock:
+                _jobs[job_id]["status"] = "error"
+                _jobs[job_id]["error"] = str(exc)
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return JSONResponse({"job_id": job_id})
+
+
+# ---------------------------------------------------------------------------
+# GET /progress/{job_id}  –  poll for processing progress
+# ---------------------------------------------------------------------------
+@app.get("/progress/{job_id}")
+async def get_progress(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job_id")
+    return {
+        "status": job["status"],          # "processing" | "done" | "error"
+        "frames_done": job["frames_done"],
+        "total_frames": job["total_frames"],
+        "error": job["error"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /result/{job_id}  –  fetch the ZIP once done
+# ---------------------------------------------------------------------------
+@app.get("/result/{job_id}")
+async def get_result(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job_id")
+    if job["status"] == "error":
+        raise HTTPException(status_code=500, detail=job["error"] or "Processing failed")
+    if job["status"] != "done":
+        raise HTTPException(status_code=409, detail="Job not finished yet")
+
+    zip_path = job["zip_path"]
+    work_dir = job["work_dir"]
+
+    def _cleanup():
+        with _jobs_lock:
+            _jobs.pop(job_id, None)
+        shutil.rmtree(work_dir, ignore_errors=True)
+        logger.debug("Cleaned up job %s", job_id)
+
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename="meshes.zip",
+        background=_cleanup_task(work_dir, job_id),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +212,11 @@ async def process_video(video: UploadFile = File(...)):
 from starlette.background import BackgroundTask
 
 
-def _cleanup_task(work_dir: str) -> BackgroundTask:
+def _cleanup_task(work_dir: str, job_id: str | None = None) -> BackgroundTask:
     def _rm():
+        if job_id is not None:
+            with _jobs_lock:
+                _jobs.pop(job_id, None)
         shutil.rmtree(work_dir, ignore_errors=True)
         logger.debug("Cleaned up %s", work_dir)
     return BackgroundTask(_rm)

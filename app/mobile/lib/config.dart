@@ -24,6 +24,8 @@ class AppConfig {
 
   static String get processEndpoint => '$_serverUrl/process';
   static String get healthEndpoint => '$_serverUrl/health';
+  static String progressEndpoint(String jobId) => '$_serverUrl/progress/$jobId';
+  static String resultEndpoint(String jobId) => '$_serverUrl/result/$jobId';
 
   /// Call once in main() before runApp.
   static Future<void> init() async {

@@ -20,6 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isProcessing = false;
   String _statusText = '';
   double _uploadProgress = 0;
+  double _serverProgress = 0; // 0.0–1.0, frames_done/total_frames
 
   Future<void> _recordAndProcess() async {
     // 1. Record video using the device camera
@@ -54,8 +55,14 @@ class _HomeScreenState extends State<HomeScreen> {
         onProgress: (p) {
           setState(() {
             _uploadProgress = p;
-            if (p >= 1.0) {
-              _statusText = 'Processing on server...';
+            if (p < 0.5) {
+              _statusText = 'Uploading video...';
+              _serverProgress = 0;
+            } else {
+              // p in [0.5, 1.0] maps to server progress [0, 1]
+              _serverProgress = ((p - 0.5) / 0.5).clamp(0.0, 1.0);
+              final pct = (_serverProgress * 100).toInt();
+              _statusText = 'Processing on server... $pct%';
             }
           });
         },
@@ -64,6 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isProcessing = false;
         _statusText = '';
+        _serverProgress = 0;
       });
 
       if (!mounted) return;
@@ -107,8 +115,13 @@ class _HomeScreenState extends State<HomeScreen> {
         onProgress: (p) {
           setState(() {
             _uploadProgress = p;
-            if (p >= 1.0) {
-              _statusText = 'Processing on server...';
+            if (p < 0.5) {
+              _statusText = 'Uploading video...';
+              _serverProgress = 0;
+            } else {
+              _serverProgress = ((p - 0.5) / 0.5).clamp(0.0, 1.0);
+              final pct = (_serverProgress * 100).toInt();
+              _statusText = 'Processing on server... $pct%';
             }
           });
         },
@@ -117,6 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isProcessing = false;
         _statusText = '';
+        _serverProgress = 0;
       });
 
       if (!mounted) return;
@@ -296,10 +310,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
               // Progress indicator
               if (_isProcessing) ...[
-                if (_uploadProgress < 1.0 && _statusText.contains('Uploading'))
-                  LinearProgressIndicator(value: _uploadProgress)
+                if (_uploadProgress < 0.5)
+                  LinearProgressIndicator(value: _uploadProgress * 2)
                 else
-                  const CircularProgressIndicator(),
+                  LinearProgressIndicator(value: _serverProgress),
                 const SizedBox(height: 12),
                 Text(
                   _statusText,
