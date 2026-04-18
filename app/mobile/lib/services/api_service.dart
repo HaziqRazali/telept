@@ -61,7 +61,7 @@ class ApiService {
     final uploadResponse = await _dio.post(
       AppConfig.processEndpoint,
       data: formData,
-      options: Options(responseType: ResponseType.bytes),
+      options: Options(responseType: ResponseType.plain),
       onSendProgress: (sent, total) {
         if (total > 0 && onProgress != null) {
           onProgress((sent / total) * 0.5);
@@ -76,7 +76,7 @@ class ApiService {
       );
     }
 
-    final uploadBody = json.decode(utf8.decode(uploadResponse.data as List<int>)) as Map<String, dynamic>;
+    final uploadBody = json.decode(uploadResponse.data as String) as Map<String, dynamic>;
     final jobId = uploadBody['job_id'] as String;
 
     // --- 2. Poll progress (50% → 99%) ----------------------------------
@@ -85,9 +85,9 @@ class ApiService {
 
       final progResponse = await _dio.get(
         AppConfig.progressEndpoint(jobId),
-        options: Options(responseType: ResponseType.bytes),
+        options: Options(responseType: ResponseType.plain),
       );
-      final body = json.decode(utf8.decode(progResponse.data as List<int>)) as Map<String, dynamic>;
+      final body = json.decode(progResponse.data as String) as Map<String, dynamic>;
       final status = body['status'] as String;
 
       if (status == 'error') {
@@ -97,8 +97,11 @@ class ApiService {
       if (status == 'processing') {
         final done = (body['frames_done'] as num).toInt();
         final total = (body['total_frames'] as num).toInt();
-        if (total > 0 && onProgress != null) {
-          onProgress(0.5 + (done / total) * 0.49);
+        if (total > 0) {
+          onProgress?.call(0.5 + (done / total) * 0.49);
+        } else {
+          // frame count unknown (e.g. iPad MOV) — heartbeat so UI stays alive
+          onProgress?.call(0.5);
         }
       }
 

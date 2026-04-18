@@ -228,6 +228,9 @@ def generate_sam3d_meshes(
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    # Some containers (e.g. iOS .mov) don't expose a reliable frame count via
+    # CAP_PROP_FRAME_COUNT.  Leave n_frames=0 so the client shows an
+    # indeterminate progress bar rather than a stuck 0%.
 
     obj_dir = os.path.join(work_dir, "objs")
     os.makedirs(obj_dir, exist_ok=True)
@@ -236,6 +239,11 @@ def generate_sam3d_meshes(
         progress_callback(0, n_frames)
 
     _COMPILE_WARMUP_FRAMES = 3  # torch.compile finishes kernel compilation by frame 3
+
+    # --- First pass: run inference on every frame, collect outputs --------
+    # We store per-frame results so we can average shape_params across the
+    # whole clip before writing any OBJ files.
+    frame_outputs: List[Optional[dict]] = []
     idx = 0
     while True:
         ret, frame_bgr = cap.read()
@@ -253,12 +261,13 @@ def generate_sam3d_meshes(
         else:
             print(f"[mesh_gen] frame {idx:04d}: {elapsed:.2f}s")
 
+        best_output = None
         if len(outputs) > 0:
             # Pick the detection whose bounding-box center is closest to the
             # image center (there should always be exactly one person, but
             # just in case the detector fires on background figures).
             img_cy, img_cx = frame_rgb.shape[0] / 2.0, frame_rgb.shape[1] / 2.0
-            best = min(
+            best_output = min(
                 outputs,
                 key=lambda o: (
                     ((o["bbox"][0] + o["bbox"][2]) / 2.0 - img_cx) ** 2
@@ -267,24 +276,78 @@ def generate_sam3d_meshes(
                 if o.get("bbox") is not None
                 else float("inf"),
             )
-            verts = best.get("pred_vertices", best.get("vertices"))
-            if verts is not None:
-                _write_obj(os.path.join(obj_dir, f"frame_{idx:04d}.obj"), verts, faces)
-            else:
-                # Write an empty OBJ as placeholder
-                _write_obj(os.path.join(obj_dir, f"frame_{idx:04d}.obj"),
-                           np.zeros((0, 3), dtype=np.float32),
-                           np.zeros((0, 3), dtype=np.int32))
-        else:
-            _write_obj(os.path.join(obj_dir, f"frame_{idx:04d}.obj"),
-                       np.zeros((0, 3), dtype=np.float32),
-                       np.zeros((0, 3), dtype=np.int32))
+
+        frame_outputs.append(best_output)
         idx += 1
         if progress_callback:
             progress_callback(idx, n_frames)
 
     cap.release()
     actual_frames = idx
+
+    # --- Average shape from first 10 valid frames -----------------------
+    # Shape (betas) is person-specific and constant over a clip.  Using only
+    # the first 10 frames is enough to get a stable estimate and means we
+    # don't need to wait for the whole video.
+    valid_shapes = [
+        o["shape_params"]
+        for o in frame_outputs
+        if o is not None and o.get("shape_params") is not None
+    ][:10]
+
+    if valid_shapes:
+        mean_shape = np.mean(valid_shapes, axis=0)  # (S,)
+        print(f"[mesh_gen] Averaged shape over {len(valid_shapes)} frame(s) (first 10)")
+
+        # Re-run FK for ALL frames with mean shape, batched in a single GPU
+        # call — essentially free (~1-2 ms total regardless of clip length).
+        valid_indices = [
+            i for i, o in enumerate(frame_outputs)
+            if o is not None and o.get("shape_params") is not None
+        ]
+        head = estimator.model.head_pose
+        device = estimator.device
+        B = len(valid_indices)
+
+        mean_shape_t = torch.from_numpy(
+            np.tile(mean_shape[None], (B, 1))
+        ).float().to(device)
+        global_trans = torch.zeros(B, 3, device=device)
+        global_rots  = torch.from_numpy(np.stack([frame_outputs[i]["global_rot"]      for i in valid_indices])).float().to(device)
+        body_poses   = torch.from_numpy(np.stack([frame_outputs[i]["body_pose_params"] for i in valid_indices])).float().to(device)
+        scales       = torch.from_numpy(np.stack([frame_outputs[i]["scale_params"]     for i in valid_indices])).float().to(device)
+        exprs        = torch.from_numpy(np.stack([frame_outputs[i]["expr_params"]      for i in valid_indices])).float().to(device)
+        hand_poses   = None
+        if frame_outputs[valid_indices[0]].get("hand_pose_params") is not None:
+            hand_poses = torch.from_numpy(
+                np.stack([frame_outputs[i]["hand_pose_params"] for i in valid_indices])
+            ).float().to(device)
+
+        with torch.no_grad():
+            verts_batch, _, _, _, _ = head._mhr_forward_core(
+                global_trans, global_rots, body_poses, hand_poses,
+                scales, mean_shape_t, exprs,
+                return_keypoints=False,
+            )
+            verts_batch[..., [1, 2]] *= -1  # same camera-system flip as postprocess_ik
+            verts_np = verts_batch.cpu().numpy()  # (B, V, 3)
+
+        for batch_i, frame_i in enumerate(valid_indices):
+            frame_outputs[frame_i]["pred_vertices"] = verts_np[batch_i]
+    else:
+        print("[mesh_gen] No valid shape params found; skipping shape averaging")
+
+    # --- Write OBJ files -------------------------------------------------
+    for i, o in enumerate(frame_outputs):
+        verts = o.get("pred_vertices") if o is not None else None
+        if verts is not None:
+            _write_obj(os.path.join(obj_dir, f"frame_{i:04d}.obj"), verts, faces)
+        else:
+            _write_obj(
+                os.path.join(obj_dir, f"frame_{i:04d}.obj"),
+                np.zeros((0, 3), dtype=np.float32),
+                np.zeros((0, 3), dtype=np.int32),
+            )
 
     # meta.json
     meta = {"frame_count": actual_frames, "fps": fps}

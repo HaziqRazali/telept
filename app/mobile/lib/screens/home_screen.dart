@@ -312,8 +312,10 @@ class _HomeScreenState extends State<HomeScreen> {
               if (_isProcessing) ...[
                 if (_uploadProgress < 0.5)
                   LinearProgressIndicator(value: _uploadProgress * 2)
+                else if (_serverProgress > 0)
+                  LinearProgressIndicator(value: _serverProgress)
                 else
-                  LinearProgressIndicator(value: _serverProgress),
+                  const LinearProgressIndicator(), // indeterminate until first frame reported
                 const SizedBox(height: 12),
                 Text(
                   _statusText,
