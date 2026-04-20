@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../config.dart';
+import '../models/mesh_meta.dart';
 import '../services/api_service.dart';
+import '../services/smpl_model.dart';
 import 'viewer_screen.dart';
 
 /// Home screen with a "Record Video" button and server upload flow.
@@ -50,7 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // 3. Upload and process
       setState(() => _statusText = 'Uploading video...');
 
-      final result = await _api.processVideo(
+      final paramsResult = await _api.processVideoParams(
         video.path,
         onProgress: (p) {
           setState(() {
@@ -59,13 +61,40 @@ class _HomeScreenState extends State<HomeScreen> {
               _statusText = 'Uploading video...';
               _serverProgress = 0;
             } else {
-              // p in [0.5, 1.0] maps to server progress [0, 1]
               _serverProgress = ((p - 0.5) / 0.5).clamp(0.0, 1.0);
               final pct = (_serverProgress * 100).toInt();
               _statusText = 'Processing on server... $pct%';
             }
           });
         },
+      );
+
+      // Run SMPL FK on device (pure Dart, ~0.5-1s for 108 frames)
+      setState(() => _statusText = 'Computing 3D frames...');
+      final smpl = SmplModel.instance;
+      final frames = <dynamic>[];
+      for (int i = 0; i < paramsResult.frameCount; i++) {
+        if (paramsResult.isValid(i)) {
+          frames.add(smpl.forward(
+            go: paramsResult.go(i),
+            bodyPose: paramsResult.bodyPose(i),
+            betas: paramsResult.betas(i),
+          ));
+        } else {
+          // No detection: empty frame
+          frames.add(smpl.forward(
+            go: List.filled(3, 0.0),
+            bodyPose: List.filled(63, 0.0),
+            betas: List.filled(10, 0.0),
+          ));
+        }
+        // Yield every 10 frames so the UI can update
+        if (i % 10 == 0) await Future.microtask(() {});
+      }
+
+      final result = ProcessingResult(
+        meta: MeshMeta(frameCount: paramsResult.frameCount, fps: paramsResult.fps),
+        frames: List.unmodifiable(frames),
       );
 
       setState(() {
@@ -110,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       setState(() => _statusText = 'Uploading video...');
 
-      final result = await _api.processVideo(
+      final paramsResult = await _api.processVideoParams(
         video.path,
         onProgress: (p) {
           setState(() {
@@ -125,6 +154,31 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           });
         },
+      );
+
+      setState(() => _statusText = 'Computing 3D frames...');
+      final smpl = SmplModel.instance;
+      final frames = <dynamic>[];
+      for (int i = 0; i < paramsResult.frameCount; i++) {
+        if (paramsResult.isValid(i)) {
+          frames.add(smpl.forward(
+            go: paramsResult.go(i),
+            bodyPose: paramsResult.bodyPose(i),
+            betas: paramsResult.betas(i),
+          ));
+        } else {
+          frames.add(smpl.forward(
+            go: List.filled(3, 0.0),
+            bodyPose: List.filled(63, 0.0),
+            betas: List.filled(10, 0.0),
+          ));
+        }
+        if (i % 10 == 0) await Future.microtask(() {});
+      }
+
+      final result = ProcessingResult(
+        meta: MeshMeta(frameCount: paramsResult.frameCount, fps: paramsResult.fps),
+        frames: List.unmodifiable(frames),
       );
 
       setState(() {

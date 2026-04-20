@@ -23,9 +23,11 @@ class AppConfig {
   static bool get hasGeminiKey => _geminiApiKey.isNotEmpty;
 
   static String get processEndpoint => '$_serverUrl/process';
+  static String get processParamsEndpoint => '$_serverUrl/process_params';
   static String get healthEndpoint => '$_serverUrl/health';
   static String progressEndpoint(String jobId) => '$_serverUrl/progress/$jobId';
   static String resultEndpoint(String jobId) => '$_serverUrl/result/$jobId';
+  static String resultParamsEndpoint(String jobId) => '$_serverUrl/result_params/$jobId';
 
   /// Call once in main() before runApp.
   static Future<void> init() async {

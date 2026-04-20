@@ -362,3 +362,177 @@ def generate_sam3d_meshes(
             zf.write(os.path.join(obj_dir, fname), fname)
 
     return zip_path, actual_frames, fps
+
+
+# ---------------------------------------------------------------------------
+# MHR → SMPL params (Option B – compact binary output)
+# ---------------------------------------------------------------------------
+
+_MHR2SMPL_MODEL_PATH = os.path.expanduser(
+    "~/Fast-SAM-3D-Body/mhr2smpl/experiments/multiview_n30000_e500/best_model.pth"
+)
+_MHR2SMPL_SMPL_PATH = os.path.expanduser(
+    "~/Fast-SAM-3D-Body/mhr2smpl/data/SMPL_NEUTRAL.pkl"
+)
+_mhr2smpl: "MHR2SMPLMultiView | None" = None
+
+
+def _get_mhr2smpl():
+    global _mhr2smpl
+    if _mhr2smpl is not None:
+        return _mhr2smpl
+    sys.path.insert(0, os.path.expanduser("~/Fast-SAM-3D-Body"))
+    from mhr2smpl.multi_view.infer_multiview import MHR2SMPLMultiView  # type: ignore
+    _mhr2smpl = MHR2SMPLMultiView(model_path=_MHR2SMPL_MODEL_PATH)
+    print("[mesh_gen] MHR2SMPLMultiView loaded")
+    return _mhr2smpl
+
+
+def generate_sam3d_params(
+    video_path: str,
+    work_dir: str,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> Tuple[str, int, float]:
+    """
+    Run SAM3DBody on every frame, convert MHR vertices → SMPL params via
+    MHR2SMPLMultiView, and write a compact binary result.
+
+    Binary format (result.bin):
+        Header  – 3 × int32  : [magic=0x534D504C, frame_count, param_count_per_frame=76]
+        Frames  – frame_count × 76 × float32:
+                    [go(3), body_pose(63), betas(10)]
+        Validity – frame_count × uint8 : 1 if valid, 0 if detection failed
+
+    Returns (bin_path, frame_count, fps).
+    """
+    import struct
+
+    estimator = _get_estimator()
+    mhr2smpl  = _get_mhr2smpl()
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    if progress_callback:
+        progress_callback(0, n_frames)
+
+    _COMPILE_WARMUP_FRAMES = 3
+
+    # --- First pass: inference on every frame ----------------------------
+    frame_outputs: List[Optional[dict]] = []
+    idx = 0
+    while True:
+        ret, frame_bgr = cap.read()
+        if not ret:
+            break
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+        t0 = time.perf_counter()
+        outputs = estimator.process_one_image(frame_rgb, bbox_thr=SAM3D_BBOX_THRESH, use_mask=False)
+        elapsed = time.perf_counter() - t0
+        if idx <= _COMPILE_WARMUP_FRAMES:
+            print(f"[mesh_gen] frame {idx:04d}: {elapsed:.2f}s")
+        else:
+            print(f"[mesh_gen] frame {idx:04d}: {elapsed:.2f}s")
+
+        best_output = None
+        if outputs:
+            img_cy, img_cx = frame_rgb.shape[0] / 2.0, frame_rgb.shape[1] / 2.0
+            best_output = min(
+                outputs,
+                key=lambda o: (
+                    ((o["bbox"][0] + o["bbox"][2]) / 2.0 - img_cx) ** 2
+                    + ((o["bbox"][1] + o["bbox"][3]) / 2.0 - img_cy) ** 2
+                )
+                if o.get("bbox") is not None
+                else float("inf"),
+            )
+
+        frame_outputs.append(best_output)
+        idx += 1
+        if progress_callback:
+            progress_callback(idx, n_frames)
+
+    cap.release()
+    actual_frames = idx
+
+    # --- Average shape + re-run batched FK (same as generate_sam3d_meshes) --
+    valid_shapes = [
+        o["shape_params"]
+        for o in frame_outputs
+        if o is not None and o.get("shape_params") is not None
+    ][:10]
+
+    if valid_shapes:
+        mean_shape = np.mean(valid_shapes, axis=0)
+        valid_indices = [
+            i for i, o in enumerate(frame_outputs)
+            if o is not None and o.get("shape_params") is not None
+        ]
+        head = estimator.model.head_pose
+        device = estimator.device
+        B = len(valid_indices)
+
+        mean_shape_t = torch.from_numpy(np.tile(mean_shape[None], (B, 1))).float().to(device)
+        global_trans = torch.zeros(B, 3, device=device)
+        global_rots  = torch.from_numpy(np.stack([frame_outputs[i]["global_rot"]      for i in valid_indices])).float().to(device)
+        body_poses   = torch.from_numpy(np.stack([frame_outputs[i]["body_pose_params"] for i in valid_indices])).float().to(device)
+        scales       = torch.from_numpy(np.stack([frame_outputs[i]["scale_params"]     for i in valid_indices])).float().to(device)
+        exprs        = torch.from_numpy(np.stack([frame_outputs[i]["expr_params"]      for i in valid_indices])).float().to(device)
+        hand_poses   = None
+        if frame_outputs[valid_indices[0]].get("hand_pose_params") is not None:
+            hand_poses = torch.from_numpy(
+                np.stack([frame_outputs[i]["hand_pose_params"] for i in valid_indices])
+            ).float().to(device)
+
+        with torch.no_grad():
+            verts_batch, _, _, _, _ = head._mhr_forward_core(
+                global_trans, global_rots, body_poses, hand_poses,
+                scales, mean_shape_t, exprs,
+                return_keypoints=False,
+            )
+            verts_batch[..., [1, 2]] *= -1
+            verts_np = verts_batch.cpu().numpy()  # (B, V, 3)
+
+        for batch_i, frame_i in enumerate(valid_indices):
+            frame_outputs[frame_i]["pred_vertices"] = verts_np[batch_i]
+
+    # --- Convert MHR vertices → SMPL params per frame --------------------
+    t_conv = time.perf_counter()
+    PARAMS_PER_FRAME = 76  # go(3) + body_pose(63) + betas(10)
+
+    params_array = np.zeros((actual_frames, PARAMS_PER_FRAME), dtype=np.float32)
+    valid_array  = np.zeros(actual_frames, dtype=np.uint8)
+
+    for i, o in enumerate(frame_outputs):
+        if o is None or o.get("pred_vertices") is None or o.get("pred_cam_t") is None:
+            continue
+        go, body_pose, betas, _ = mhr2smpl.infer([(o["pred_vertices"], o["pred_cam_t"])])
+        params_array[i, :3]    = go.astype(np.float32)
+        params_array[i, 3:66]  = body_pose.astype(np.float32)
+        params_array[i, 66:76] = betas.astype(np.float32)
+        valid_array[i] = 1
+
+    print(f"[mesh_gen] MHR→SMPL conversion: {time.perf_counter() - t_conv:.2f}s for {actual_frames} frames")
+    print(f"[mesh_gen] Valid frames: {int(valid_array.sum())}/{actual_frames}")
+
+    # --- Write compact binary --------------------------------------------
+    # Header: magic(4) + frame_count(4) + params_per_frame(4) + fps_float(4)
+    MAGIC = 0x534D504C  # 'SMPL'
+    bin_path = os.path.join(work_dir, "result.bin")
+    with open(bin_path, "wb") as f:
+        f.write(struct.pack("<I", MAGIC))
+        f.write(struct.pack("<I", actual_frames))
+        f.write(struct.pack("<I", PARAMS_PER_FRAME))
+        f.write(struct.pack("<f", fps))
+        f.write(params_array.tobytes())   # actual_frames × 76 × 4 bytes
+        f.write(valid_array.tobytes())    # actual_frames × 1 byte
+
+    size_kb = os.path.getsize(bin_path) / 1024
+    print(f"[mesh_gen] result.bin: {size_kb:.1f} KB ({actual_frames} frames)")
+
+    return bin_path, actual_frames, fps
