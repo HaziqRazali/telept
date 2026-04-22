@@ -64,6 +64,9 @@ SAM3D_DETECTOR_NAME=yolo_pose \
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
+# kill 
+lsof -ti:8000 | xargs kill -9
+
 ---
 
 ## Setting up on a fresh machine
