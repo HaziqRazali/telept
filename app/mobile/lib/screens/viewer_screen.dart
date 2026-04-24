@@ -28,7 +28,12 @@ class ViewerScreen extends StatefulWidget {
     required ProcessingResult this.result,
     required this.videoPath,
   })  : framesNotifier = null,
-        streamingFps = null;
+        streamingFps = null,
+        totalFramesNotifier = null;
+
+  /// Total expected frame count for the full video (used for the buffer track).
+  /// Updated by the home screen's polling loop as total_frames becomes known.
+  final ValueNotifier<int>? totalFramesNotifier;
 
   /// Streaming constructor: frames arrive incrementally via [framesNotifier].
   const ViewerScreen.streaming({
@@ -36,6 +41,7 @@ class ViewerScreen extends StatefulWidget {
     required ValueNotifier<List<MeshFrame>> this.framesNotifier,
     required double this.streamingFps,
     required this.videoPath,
+    this.totalFramesNotifier,
   }) : result = null;
 
   @override
@@ -79,6 +85,10 @@ class _ViewerScreenState extends State<ViewerScreen>
 
   int get _totalFrames => _frames.length;
 
+  /// Total expected frames for the full video (0 = unknown).
+  int get _totalExpectedFrames =>
+      widget.totalFramesNotifier?.value ?? 0;
+
   double get _fps =>
       widget.streamingFps ?? widget.result!.meta.fps;
 
@@ -103,8 +113,9 @@ class _ViewerScreenState extends State<ViewerScreen>
       duration: Duration(milliseconds: initialDurationMs),
     )..addListener(_onPlayTick);
 
-    // Listen for new frames in streaming mode.
+    // Listen for new frames and total-frame updates in streaming mode.
     widget.framesNotifier?.addListener(_onFramesUpdated);
+    widget.totalFramesNotifier?.addListener(_onFramesUpdated);
 
     _videoController = VideoPlayerController.file(File(widget.videoPath))
       ..initialize().then((_) {
@@ -177,9 +188,52 @@ class _ViewerScreenState extends State<ViewerScreen>
   @override
   void dispose() {
     widget.framesNotifier?.removeListener(_onFramesUpdated);
+    widget.totalFramesNotifier?.removeListener(_onFramesUpdated);
     _playController.dispose();
     _videoController.dispose();
     super.dispose();
+  }
+
+  // ── Scrubber with optional buffer-track overlay ─────────────────────
+  Widget _buildScrubber(BuildContext context) {
+    final loaded   = _totalFrames;
+    final expected = _totalExpectedFrames;
+    final isStreaming = widget.totalFramesNotifier != null && expected > loaded;
+
+    // In streaming mode: max = total expected so the grey "unloaded" region
+    // is visible.  onChanged clamps to loaded frames so the user cannot seek
+    // past what is ready.
+    final sliderMax   = isStreaming ? (expected - 1).toDouble()
+                                    : (loaded > 1 ? (loaded - 1).toDouble() : 1.0);
+    final sliderValue = loaded > 0 ? _currentFrame.clamp(0, loaded - 1).toDouble() : 0.0;
+    final divisions   = isStreaming ? (expected - 1) : (loaded > 1 ? loaded - 1 : 1);
+
+    return SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        trackHeight: 2,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+        overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+        // Played portion (left of thumb)
+        activeTrackColor: Colors.white,
+        // Buffered-but-not-played portion (thumb → secondaryTrackValue)
+        secondaryActiveTrackColor: Colors.white38,
+        // Not-yet-downloaded portion (secondaryTrackValue → max)
+        inactiveTrackColor: isStreaming ? Colors.white12 : Colors.white30,
+      ),
+      child: Slider(
+        value: sliderValue,
+        min: 0,
+        max: sliderMax,
+        divisions: divisions,
+        // Marks the right edge of the buffered region.
+        secondaryTrackValue: isStreaming
+            ? (loaded > 0 ? (loaded - 1).toDouble() : 0.0)
+            : null,
+        onChanged: loaded > 1
+            ? (v) => _seekToFrame(v.clamp(0, loaded - 1).round())
+            : null,
+      ),
+    );
   }
 
   @override
@@ -271,26 +325,7 @@ class _ViewerScreenState extends State<ViewerScreen>
                     onPressed: _totalFrames > 1 ? _togglePlayback : null,
                   ),
                   Expanded(
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 2,
-                        thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 6),
-                        overlayShape: const RoundSliderOverlayShape(
-                            overlayRadius: 12),
-                      ),
-                      child: Slider(
-                        value: _totalFrames > 0
-                            ? _currentFrame.clamp(0, _totalFrames - 1).toDouble()
-                            : 0.0,
-                        min: 0,
-                        max: _totalFrames > 1 ? (_totalFrames - 1).toDouble() : 1.0,
-                        divisions: _totalFrames > 1 ? _totalFrames - 1 : 1,
-                        onChanged: _totalFrames > 1
-                            ? (v) => _seekToFrame(v.round())
-                            : null,
-                      ),
-                    ),
+                    child: _buildScrubber(context),
                   ),
                 ],
               ),

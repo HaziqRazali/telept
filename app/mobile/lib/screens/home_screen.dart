@@ -79,6 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // 3. Poll until minStartFrames are ready (or job is done)
       setState(() => _statusText = 'Processing on server...');
+      final totalFramesNotifier = ValueNotifier<int>(0);
       while (mounted) {
         await Future.delayed(const Duration(milliseconds: 800));
         if (!mounted) return;
@@ -93,6 +94,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final framesDone = (progress['frames_done'] as num).toInt();
         final totalFrames = (progress['total_frames'] as num).toInt();
         if (totalFrames > 0) {
+          totalFramesNotifier.value = totalFrames;
           setState(() {
             _serverProgress = framesDone / totalFrames;
             _statusText = 'Processing on server... ${(_serverProgress * 100).toInt()}%';
@@ -128,6 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
             framesNotifier: framesNotifier,
             streamingFps: fps,
             videoPath: videoPath,
+            totalFramesNotifier: totalFramesNotifier,
           ),
         ),
       );
@@ -136,6 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await _streamRemainingFrames(
         jobId: jobId,
         notifier: framesNotifier,
+        totalFramesNotifier: totalFramesNotifier,
         smpl: smpl,
         nextFrame: initialParams.frameCount,
       );
@@ -180,6 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _streamRemainingFrames({
     required String jobId,
     required ValueNotifier<List<MeshFrame>> notifier,
+    required ValueNotifier<int> totalFramesNotifier,
     required SmplModel smpl,
     required int nextFrame,
   }) async {
@@ -193,7 +198,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
         if (status == 'error') break; // non-fatal; user already has partial data
 
-        final framesDone = (progress['frames_done'] as num).toInt();
+        final framesDone  = (progress['frames_done']  as num).toInt();
+        final totalFrames = (progress['total_frames'] as num).toInt();
+
+        // Keep totalFramesNotifier current so the scrubber grey bar stays accurate.
+        if (totalFrames > 0) totalFramesNotifier.value = totalFrames;
 
         if (framesDone > nextFrame) {
           final partial = await _api.fetchPartialParams(jobId, nextFrame);

@@ -259,17 +259,17 @@ class SmplModel {
     }
 
     // mhr2smpl outputs global orient in camera space (Y-down, Z-into-screen).
-    // SMPL renders in Y-up space. Correct by post-multiplying the root rotation
-    // by R_x(180°) = diag(1, -1, -1), which flips Y and Z axes.
-    // R_new = R_go * R_x(180°)
-    // Row-major: new col j = old col j with rows 1,2 negated
-    //   [r0,r1,r2]   [r0, -r1, -r2]
-    //   [r3,r4,r5] → [r3, -r4, -r5]
-    //   [r6,r7,r8]   [r6, -r7, -r8]
-    rotMats[1] = -rotMats[1];
-    rotMats[2] = -rotMats[2];
+    // SMPL renders in Y-up space. Correct by pre-multiplying the root rotation
+    // by R_x(180°) = diag(1, -1, -1), which changes the coordinate frame:
+    //   R_new = R_x(180°) * R_go
+    // This negates rows 1 and 2 of the rotation matrix (row-major):
+    //   [r0, r1, r2]      [ r0,  r1,  r2]
+    //   [r3, r4, r5]  →   [-r3, -r4, -r5]
+    //   [r6, r7, r8]      [-r6, -r7, -r8]
+    rotMats[3] = -rotMats[3];
     rotMats[4] = -rotMats[4];
     rotMats[5] = -rotMats[5];
+    rotMats[6] = -rotMats[6];
     rotMats[7] = -rotMats[7];
     rotMats[8] = -rotMats[8];
 
