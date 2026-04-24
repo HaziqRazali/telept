@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../models/mesh_frame.dart';
 import '../services/api_service.dart';
 import '../widgets/mesh_viewer.dart';
 import '../widgets/chat_panel.dart';
@@ -10,14 +11,32 @@ import '../widgets/chat_panel.dart';
 /// Full-screen viewer with a left icon-rail sidebar to show / hide three panels:
 /// (1) Video playback  (2) 3D mesh  (3) Gemini chatbot
 class ViewerScreen extends StatefulWidget {
-  final ProcessingResult result;
+  /// Static result (all frames available up-front).
+  final ProcessingResult? result;
+
+  /// Streaming result — frames are appended to this notifier over time.
+  final ValueNotifier<List<MeshFrame>>? framesNotifier;
+
+  /// FPS for streaming mode (ignored when [result] is provided).
+  final double? streamingFps;
+
   final String videoPath;
 
+  /// Standard constructor: all frames are already computed.
   const ViewerScreen({
     super.key,
-    required this.result,
+    required ProcessingResult this.result,
     required this.videoPath,
-  });
+  })  : framesNotifier = null,
+        streamingFps = null;
+
+  /// Streaming constructor: frames arrive incrementally via [framesNotifier].
+  const ViewerScreen.streaming({
+    super.key,
+    required ValueNotifier<List<MeshFrame>> this.framesNotifier,
+    required double this.streamingFps,
+    required this.videoPath,
+  }) : result = null;
 
   @override
   State<ViewerScreen> createState() => _ViewerScreenState();
@@ -54,6 +73,15 @@ class _ViewerScreenState extends State<ViewerScreen>
     });
   }
 
+  // ── Frame accessors ─────────────────────────────────────────────────
+  List<MeshFrame> get _frames =>
+      widget.framesNotifier?.value ?? widget.result!.frames.cast<MeshFrame>();
+
+  int get _totalFrames => _frames.length;
+
+  double get _fps =>
+      widget.streamingFps ?? widget.result!.meta.fps;
+
   // ── Playback ────────────────────────────────────────────────────────
   int _currentFrame = 0;
   bool _isPlaying = false;
@@ -62,24 +90,39 @@ class _ViewerScreenState extends State<ViewerScreen>
   late VideoPlayerController _videoController;
   bool _videoInitialized = false;
 
-  int get _totalFrames => widget.result.frames.length;
-  double get _fps => widget.result.meta.fps;
-
   @override
   void initState() {
     super.initState();
 
-    final totalDurationMs =
-        _totalFrames > 0 ? (_totalFrames / _fps * 1000).round() : 1000;
+    // Start with whatever frames are available; duration will grow as more arrive.
+    final initialFrames = _totalFrames;
+    final initialDurationMs =
+        initialFrames > 0 ? (initialFrames / _fps * 1000).round() : 1000;
     _playController = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: totalDurationMs),
+      duration: Duration(milliseconds: initialDurationMs),
     )..addListener(_onPlayTick);
+
+    // Listen for new frames in streaming mode.
+    widget.framesNotifier?.addListener(_onFramesUpdated);
 
     _videoController = VideoPlayerController.file(File(widget.videoPath))
       ..initialize().then((_) {
         if (mounted) setState(() => _videoInitialized = true);
       });
+  }
+
+  /// Called when new frames are appended in streaming mode.
+  void _onFramesUpdated() {
+    if (!mounted) return;
+    setState(() {
+      // Extend the controller duration to match the new total so the scrubber
+      // max grows automatically.  Don't interrupt a running animation.
+      if (!_isPlaying) {
+        final newDurationMs = (_totalFrames / _fps * 1000).round();
+        _playController.duration = Duration(milliseconds: newDurationMs);
+      }
+    });
   }
 
   void _onPlayTick() {
@@ -133,6 +176,7 @@ class _ViewerScreenState extends State<ViewerScreen>
 
   @override
   void dispose() {
+    widget.framesNotifier?.removeListener(_onFramesUpdated);
     _playController.dispose();
     _videoController.dispose();
     super.dispose();
@@ -140,7 +184,8 @@ class _ViewerScreenState extends State<ViewerScreen>
 
   @override
   Widget build(BuildContext context) {
-    final frame = widget.result.frames[_currentFrame];
+    final frames = _frames;
+    final frame = frames.isEmpty ? null : frames[_currentFrame.clamp(0, frames.length - 1)];
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -184,7 +229,14 @@ class _ViewerScreenState extends State<ViewerScreen>
                             Container(width: 1, color: Colors.white12),
                         ],
                         if (_showMesh) ...[
-                          Expanded(child: MeshViewer(frame: frame)),
+                          Expanded(
+                            child: frame != null
+                                ? MeshViewer(frame: frame)
+                                : const Center(
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white54),
+                                  ),
+                          ),
                           if (_showChat)
                             Container(width: 1, color: Colors.white12),
                         ],
@@ -228,12 +280,15 @@ class _ViewerScreenState extends State<ViewerScreen>
                             overlayRadius: 12),
                       ),
                       child: Slider(
-                        value: _currentFrame.toDouble(),
+                        value: _totalFrames > 0
+                            ? _currentFrame.clamp(0, _totalFrames - 1).toDouble()
+                            : 0.0,
                         min: 0,
-                        max: (_totalFrames - 1).toDouble(),
-                        divisions:
-                            _totalFrames > 1 ? _totalFrames - 1 : 1,
-                        onChanged: (v) => _seekToFrame(v.round()),
+                        max: _totalFrames > 1 ? (_totalFrames - 1).toDouble() : 1.0,
+                        divisions: _totalFrames > 1 ? _totalFrames - 1 : 1,
+                        onChanged: _totalFrames > 1
+                            ? (v) => _seekToFrame(v.round())
+                            : null,
                       ),
                     ),
                   ),

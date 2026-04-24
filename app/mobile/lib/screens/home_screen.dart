@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../config.dart';
-import '../models/mesh_meta.dart';
+import '../models/mesh_frame.dart';
+import '../models/smpl_params_result.dart';
 import '../services/api_service.dart';
 import '../services/smpl_model.dart';
 import 'viewer_screen.dart';
@@ -25,97 +26,17 @@ class _HomeScreenState extends State<HomeScreen> {
   double _serverProgress = 0; // 0.0–1.0, frames_done/total_frames
 
   Future<void> _recordAndProcess() async {
-    // 1. Record video using the device camera
     final XFile? video = await _picker.pickVideo(
       source: ImageSource.camera,
-      maxDuration: const Duration(seconds: 60),
+      maxDuration: AppConfig.maxVideoDurationSec > 0
+          ? Duration(seconds: AppConfig.maxVideoDurationSec)
+          : null,
     );
-
     if (video == null) {
       _showSnack('Recording cancelled');
       return;
     }
-
-    setState(() {
-      _isProcessing = true;
-      _statusText = 'Checking server...';
-      _uploadProgress = 0;
-    });
-
-    try {
-      // 2. Check server health
-      final reachable = await _api.isServerReachable();
-      if (!reachable) {
-        throw const ApiException('Cannot reach server. Check Wi-Fi and server URL.');
-      }
-
-      // 3. Upload and process
-      setState(() => _statusText = 'Uploading video...');
-
-      final paramsResult = await _api.processVideoParams(
-        video.path,
-        onProgress: (p) {
-          setState(() {
-            _uploadProgress = p;
-            if (p < 0.5) {
-              _statusText = 'Uploading video...';
-              _serverProgress = 0;
-            } else {
-              _serverProgress = ((p - 0.5) / 0.5).clamp(0.0, 1.0);
-              final pct = (_serverProgress * 100).toInt();
-              _statusText = 'Processing on server... $pct%';
-            }
-          });
-        },
-      );
-
-      // Run SMPL FK on device (pure Dart, ~0.5-1s for 108 frames)
-      setState(() => _statusText = 'Computing 3D frames...');
-      final smpl = SmplModel.instance;
-      final frames = <dynamic>[];
-      for (int i = 0; i < paramsResult.frameCount; i++) {
-        if (paramsResult.isValid(i)) {
-          frames.add(smpl.forward(
-            go: paramsResult.go(i),
-            bodyPose: paramsResult.bodyPose(i),
-            betas: paramsResult.betas(i),
-          ));
-        } else {
-          // No detection: empty frame
-          frames.add(smpl.forward(
-            go: List.filled(3, 0.0),
-            bodyPose: List.filled(63, 0.0),
-            betas: List.filled(10, 0.0),
-          ));
-        }
-        // Yield every 10 frames so the UI can update
-        if (i % 10 == 0) await Future.microtask(() {});
-      }
-
-      final result = ProcessingResult(
-        meta: MeshMeta(frameCount: paramsResult.frameCount, fps: paramsResult.fps),
-        frames: List.unmodifiable(frames),
-      );
-
-      setState(() {
-        _isProcessing = false;
-        _statusText = '';
-        _serverProgress = 0;
-      });
-
-      if (!mounted) return;
-
-      // 4. Navigate to the 3D viewer
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ViewerScreen(result: result, videoPath: video.path),
-        ),
-      );
-    } on ApiException catch (e) {
-      _showError(e.message);
-    } catch (e) {
-      _showError('Unexpected error: $e');
-    }
+    await _processVideo(video.path);
   }
 
   Future<void> _pickVideoFromGallery() async {
@@ -124,80 +45,169 @@ class _HomeScreenState extends State<HomeScreen> {
       _showSnack('No video selected');
       return;
     }
+    await _processVideo(video.path);
+  }
 
+  // ---------------------------------------------------------------------------
+  // Core streaming processing flow
+  // ---------------------------------------------------------------------------
+
+  Future<void> _processVideo(String videoPath) async {
     setState(() {
       _isProcessing = true;
       _statusText = 'Checking server...';
       _uploadProgress = 0;
+      _serverProgress = 0;
     });
 
     try {
+      // 1. Health check
       final reachable = await _api.isServerReachable();
       if (!reachable) {
         throw const ApiException('Cannot reach server. Check Wi-Fi and server URL.');
       }
 
+      // 2. Upload video, get job_id immediately
       setState(() => _statusText = 'Uploading video...');
-
-      final paramsResult = await _api.processVideoParams(
-        video.path,
-        onProgress: (p) {
-          setState(() {
-            _uploadProgress = p;
-            if (p < 0.5) {
-              _statusText = 'Uploading video...';
-              _serverProgress = 0;
-            } else {
-              _serverProgress = ((p - 0.5) / 0.5).clamp(0.0, 1.0);
-              final pct = (_serverProgress * 100).toInt();
-              _statusText = 'Processing on server... $pct%';
-            }
-          });
-        },
+      final jobId = await _api.uploadVideo(
+        videoPath,
+        onSendProgress: (p) => setState(() {
+          _uploadProgress = p;
+          _statusText = 'Uploading video... ${(p * 100).toInt()}%';
+        }),
       );
 
-      setState(() => _statusText = 'Computing 3D frames...');
-      final smpl = SmplModel.instance;
-      final frames = <dynamic>[];
-      for (int i = 0; i < paramsResult.frameCount; i++) {
-        if (paramsResult.isValid(i)) {
-          frames.add(smpl.forward(
-            go: paramsResult.go(i),
-            bodyPose: paramsResult.bodyPose(i),
-            betas: paramsResult.betas(i),
-          ));
-        } else {
-          frames.add(smpl.forward(
-            go: List.filled(3, 0.0),
-            bodyPose: List.filled(63, 0.0),
-            betas: List.filled(10, 0.0),
-          ));
+      // 3. Poll until minStartFrames are ready (or job is done)
+      setState(() => _statusText = 'Processing on server...');
+      while (mounted) {
+        await Future.delayed(const Duration(milliseconds: 800));
+        if (!mounted) return;
+
+        final progress = await _api.pollProgress(jobId);
+        final status = progress['status'] as String;
+
+        if (status == 'error') {
+          throw ApiException(progress['error'] as String? ?? 'Server processing failed');
         }
-        if (i % 10 == 0) await Future.microtask(() {});
+
+        final framesDone = (progress['frames_done'] as num).toInt();
+        final totalFrames = (progress['total_frames'] as num).toInt();
+        if (totalFrames > 0) {
+          setState(() {
+            _serverProgress = framesDone / totalFrames;
+            _statusText = 'Processing on server... ${(_serverProgress * 100).toInt()}%';
+          });
+        }
+
+        if (status == 'done' || framesDone >= AppConfig.minStartFrames) break;
       }
-
-      final result = ProcessingResult(
-        meta: MeshMeta(frameCount: paramsResult.frameCount, fps: paramsResult.fps),
-        frames: List.unmodifiable(frames),
-      );
-
-      setState(() {
-        _isProcessing = false;
-        _statusText = '';
-        _serverProgress = 0;
-      });
-
       if (!mounted) return;
 
+      // 4. Fetch the initial batch of frames
+      final initialParams = await _api.fetchPartialParams(jobId, 0);
+      if (!mounted) return;
+
+      // 5. Run FK on device for the initial batch
+      setState(() => _statusText = 'Computing 3D frames...');
+      final smpl = SmplModel.instance;
+      final initialFrames = await _runFk(smpl, initialParams);
+      if (!mounted) return;
+
+      final fps = initialParams.fps > 0 ? initialParams.fps : 30.0;
+      final framesNotifier = ValueNotifier<List<MeshFrame>>(initialFrames);
+
+      setState(() {
+        _statusText = '';
+        // Keep _isProcessing = true so buttons remain disabled until background loop ends.
+      });
+
+      // 6. Open the viewer immediately with what we have
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ViewerScreen(result: result, videoPath: video.path),
+          builder: (_) => ViewerScreen.streaming(
+            framesNotifier: framesNotifier,
+            streamingFps: fps,
+            videoPath: videoPath,
+          ),
         ),
+      );
+
+      // 7. Continue fetching remaining frames in the background
+      await _streamRemainingFrames(
+        jobId: jobId,
+        notifier: framesNotifier,
+        smpl: smpl,
+        nextFrame: initialParams.frameCount,
       );
     } on ApiException catch (e) {
       _showError(e.message);
     } catch (e) {
       _showError('Unexpected error: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _statusText = '';
+          _serverProgress = 0;
+        });
+      }
+    }
+  }
+
+  /// Run SMPL forward kinematics on [params] and return the resulting frames.
+  Future<List<MeshFrame>> _runFk(SmplModel smpl, SmplParamsResult params) async {
+    final frames = <MeshFrame>[];
+    for (int i = 0; i < params.frameCount; i++) {
+      if (params.isValid(i)) {
+        frames.add(smpl.forward(
+          go: params.go(i),
+          bodyPose: params.bodyPose(i),
+          betas: params.betas(i),
+        ));
+      } else {
+        frames.add(smpl.forward(
+          go: List.filled(3, 0.0),
+          bodyPose: List.filled(63, 0.0),
+          betas: List.filled(10, 0.0),
+        ));
+      }
+      if (i % 10 == 0) await Future.microtask(() {});
+    }
+    return frames;
+  }
+
+  /// Background loop that keeps appending frames to [notifier] until the job is done.
+  Future<void> _streamRemainingFrames({
+    required String jobId,
+    required ValueNotifier<List<MeshFrame>> notifier,
+    required SmplModel smpl,
+    required int nextFrame,
+  }) async {
+    try {
+      while (mounted) {
+        await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) break;
+
+        final progress = await _api.pollProgress(jobId);
+        final status = progress['status'] as String;
+
+        if (status == 'error') break; // non-fatal; user already has partial data
+
+        final framesDone = (progress['frames_done'] as num).toInt();
+
+        if (framesDone > nextFrame) {
+          final partial = await _api.fetchPartialParams(jobId, nextFrame);
+          if (partial.frameCount > 0) {
+            final newFrames = await _runFk(smpl, partial);
+            notifier.value = List.unmodifiable([...notifier.value, ...newFrames]);
+            nextFrame += partial.frameCount;
+          }
+        }
+
+        if (status == 'done') break;
+      }
+    } catch (_) {
+      // Background fetch errors are non-fatal; the user can still scrub what they have.
     }
   }
 

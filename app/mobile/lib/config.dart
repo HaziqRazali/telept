@@ -28,6 +28,11 @@ class AppConfig {
   static String progressEndpoint(String jobId) => '$_serverUrl/progress/$jobId';
   static String resultEndpoint(String jobId) => '$_serverUrl/result/$jobId';
   static String resultParamsEndpoint(String jobId) => '$_serverUrl/result_params/$jobId';
+  static String resultParamsPartialEndpoint(String jobId, int fromFrame) =>
+      '$_serverUrl/result_params_partial/$jobId?from_frame=$fromFrame';
+
+  /// Minimum frames that must be ready before the viewer opens in streaming mode.
+  static const int minStartFrames = 30;
 
   /// Call once in main() before runApp.
   static Future<void> init() async {

@@ -9,7 +9,6 @@ import '../models/mesh_frame.dart';
 import '../models/mesh_meta.dart';
 import '../models/smpl_params_result.dart';
 import 'obj_parser.dart';
-import 'smpl_model.dart';
 
 /// Result of processing a video on the server (OBJ path).
 class ProcessingResult {
@@ -120,6 +119,68 @@ class ApiService {
     final binBytes = Uint8List.fromList(resultResponse.data as List<int>);
     onProgress?.call(1.0);
     return SmplParamsResult.fromBinary(binBytes);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Streaming SMPL params path
+  // ---------------------------------------------------------------------------
+
+  /// Upload [videoPath] and return the job_id immediately (does not wait for processing).
+  ///
+  /// [onSendProgress] reports upload fraction 0.0–1.0.
+  Future<String> uploadVideo(
+    String videoPath, {
+    void Function(double progress)? onSendProgress,
+  }) async {
+    final formData = FormData.fromMap({
+      'video': await MultipartFile.fromFile(videoPath, filename: 'recording.mp4'),
+    });
+
+    final response = await _dio.post(
+      AppConfig.processParamsEndpoint,
+      data: formData,
+      options: Options(responseType: ResponseType.plain),
+      onSendProgress: (sent, total) {
+        if (total > 0) onSendProgress?.call(sent / total);
+      },
+    );
+
+    if (response.statusCode != 200) {
+      throw ApiException(
+        'Server returned status ${response.statusCode}',
+        statusCode: response.statusCode,
+      );
+    }
+
+    return (json.decode(response.data as String) as Map<String, dynamic>)['job_id'] as String;
+  }
+
+  /// Poll /progress/{jobId} once and return the status map.
+  Future<Map<String, dynamic>> pollProgress(String jobId) async {
+    final response = await _dio.get(
+      AppConfig.progressEndpoint(jobId),
+      options: Options(responseType: ResponseType.plain),
+    );
+    return json.decode(response.data as String) as Map<String, dynamic>;
+  }
+
+  /// Fetch SMPL params starting from [fromFrame] (frames ready so far).
+  ///
+  /// Returns a [SmplParamsResult] with however many frames are available.
+  /// Safe to call while the job is still processing.
+  Future<SmplParamsResult> fetchPartialParams(String jobId, int fromFrame) async {
+    final response = await _dio.get(
+      AppConfig.resultParamsPartialEndpoint(jobId, fromFrame),
+      options: Options(responseType: ResponseType.bytes),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException(
+        'Server returned ${response.statusCode}',
+        statusCode: response.statusCode,
+      );
+    }
+    final bytes = Uint8List.fromList(response.data as List<int>);
+    return SmplParamsResult.fromBinary(bytes);
   }
 
   // ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from config import HOST, MAX_UPLOAD_SIZE_MB, PORT, TEMP_DIR, USE_SAM3D
 from mesh_gen import generate_stub_meshes, generate_sam3d_meshes, generate_sam3d_params
@@ -202,9 +202,13 @@ async def process_video_params(video: UploadFile = File(...)):
             "frames_done": 0,
             "total_frames": 0,
             "work_dir": work_dir,
-            "bin_path": None,
             "error": None,
             "mode": "params",
+            # Streaming buffers – appended as frames become ready.
+            "params_buffer": bytearray(),  # N × 76 × 4 bytes
+            "valid_buffer":  bytearray(),  # N × 1 byte
+            "params_frames_ready": 0,
+            "fps": 0.0,
         }
 
     def _run():
@@ -214,38 +218,41 @@ async def process_video_params(video: UploadFile = File(...)):
                     _jobs[job_id]["frames_done"] = frames_done
                     _jobs[job_id]["total_frames"] = total_frames
 
+            def _frame_ready(frame_idx: int, params_row, valid: int, fps: float):
+                with _jobs_lock:
+                    job = _jobs[job_id]
+                    job["params_buffer"] += params_row.astype("float32").tobytes()
+                    job["valid_buffer"]  += bytes([valid])
+                    job["params_frames_ready"] += 1
+                    if job["fps"] == 0.0:
+                        job["fps"] = fps
+
             t0 = time.time()
             if USE_SAM3D:
                 bin_path, n_frames, fps = generate_sam3d_params(
-                    video_path, work_dir, progress_callback=_progress
+                    video_path, work_dir,
+                    progress_callback=_progress,
+                    frame_ready_callback=_frame_ready,
                 )
             else:
-                # Stub: generate a rest-pose binary (all zeros → T-pose)
-                import cv2 as _cv2, struct as _struct, numpy as _np
+                # Stub: emit rest-pose T-pose frames one by one.
+                import cv2 as _cv2, numpy as _np
                 cap = _cv2.VideoCapture(video_path)
                 fps = cap.get(_cv2.CAP_PROP_FPS) or 30.0
                 n_frames = max(1, int(cap.get(_cv2.CAP_PROP_FRAME_COUNT)))
                 cap.release()
                 PARAMS_PER_FRAME = 76
-                MAGIC = 0x534D504C
-                bin_path = os.path.join(work_dir, "result.bin")
-                params_array = _np.zeros((n_frames, PARAMS_PER_FRAME), dtype=_np.float32)
-                valid_array  = _np.ones(n_frames, dtype=_np.uint8)
-                with open(bin_path, "wb") as bf:
-                    bf.write(_struct.pack("<I", MAGIC))
-                    bf.write(_struct.pack("<I", n_frames))
-                    bf.write(_struct.pack("<I", PARAMS_PER_FRAME))
-                    bf.write(_struct.pack("<f", float(fps)))
-                    bf.write(params_array.tobytes())
-                    bf.write(valid_array.tobytes())
-                _progress(n_frames, n_frames)
+                zero_row = _np.zeros(PARAMS_PER_FRAME, dtype=_np.float32)
+                for i in range(n_frames):
+                    _frame_ready(i, zero_row, 1, fps)
+                    _progress(i + 1, n_frames)
+                bin_path = None  # not used; result reconstructed from buffer
 
             elapsed = time.time() - t0
             logger.info("Params job %s: %d frames in %.2fs", job_id, n_frames, elapsed)
 
             with _jobs_lock:
                 _jobs[job_id]["status"] = "done"
-                _jobs[job_id]["bin_path"] = bin_path
                 _jobs[job_id]["frames_done"] = n_frames
                 _jobs[job_id]["total_frames"] = n_frames
         except Exception as exc:
@@ -308,7 +315,7 @@ async def get_result(job_id: str):
 
 
 # ---------------------------------------------------------------------------
-# GET /result_params/{job_id}  –  fetch the compact SMPL binary
+# GET /result_params/{job_id}  –  fetch the full SMPL binary once done
 # ---------------------------------------------------------------------------
 @app.get("/result_params/{job_id}")
 async def get_result_params(job_id: str):
@@ -321,17 +328,77 @@ async def get_result_params(job_id: str):
     if job["status"] != "done":
         raise HTTPException(status_code=409, detail="Job not finished yet")
 
-    bin_path = job.get("bin_path")
-    if not bin_path or not os.path.exists(bin_path):
-        raise HTTPException(status_code=404, detail="Binary result not found")
-
+    body = _build_params_binary(job, from_frame=0)
     work_dir = job["work_dir"]
-    return FileResponse(
-        path=bin_path,
+    return Response(
+        content=bytes(body),
         media_type="application/octet-stream",
-        filename="smpl_params.bin",
+        headers={"Content-Disposition": "attachment; filename=smpl_params.bin"},
         background=_cleanup_task(work_dir, job_id),
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /result_params_partial/{job_id}  –  fetch frames ready so far
+# ---------------------------------------------------------------------------
+@app.get("/result_params_partial/{job_id}")
+async def get_result_params_partial(job_id: str, from_frame: int = 0):
+    """
+    Return however many SMPL-param frames have been computed so far,
+    starting from *from_frame*.  Safe to call while the job is still
+    processing.  Returns an empty-frame binary (frame_count=0) when
+    nothing new is available yet.
+    """
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job_id")
+    if job["status"] == "error":
+        raise HTTPException(status_code=500, detail=job["error"] or "Processing failed")
+
+    body = _build_params_binary(job, from_frame=from_frame)
+    return Response(
+        content=bytes(body),
+        media_type="application/octet-stream",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helper: build SMPL binary from the in-memory streaming buffers
+# ---------------------------------------------------------------------------
+import struct as _struct
+
+_PARAMS_PER_FRAME = 76
+_PARAMS_BYTES     = _PARAMS_PER_FRAME * 4  # float32
+_MAGIC            = 0x534D504C  # 'SMPL'
+
+
+def _build_params_binary(job: dict, from_frame: int) -> bytearray:
+    """
+    Slice job['params_buffer'] / job['valid_buffer'] from *from_frame* to
+    however many frames are ready, and wrap with the standard binary header.
+
+    Caller must hold *no* lock – this function takes _jobs_lock internally
+    to copy the buffers atomically.
+    """
+    with _jobs_lock:
+        frames_ready = job["params_frames_ready"]
+        fps          = job["fps"]
+        # Take a snapshot of the bytes we need (avoids holding lock during Response).
+        start_byte   = from_frame * _PARAMS_BYTES
+        end_byte     = frames_ready * _PARAMS_BYTES
+        params_slice = bytes(job["params_buffer"][start_byte:end_byte])
+        valid_slice  = bytes(job["valid_buffer"][from_frame:frames_ready])
+
+    count = max(0, frames_ready - from_frame)
+    out = bytearray()
+    out += _struct.pack("<I", _MAGIC)
+    out += _struct.pack("<I", count)
+    out += _struct.pack("<I", _PARAMS_PER_FRAME)
+    out += _struct.pack("<f", float(fps))
+    out += params_slice
+    out += valid_slice
+    return out
 
 
 # ---------------------------------------------------------------------------
