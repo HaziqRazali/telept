@@ -285,34 +285,51 @@ class _ViewerScreenState extends State<ViewerScreen>
                       children: [
                         if (_overlayMesh && _showVideo && _showMesh) ...[
                           // Overlay mode: mesh drawn semi-transparently over video.
+                          // Both the video and the overlay live inside the same
+                          // AspectRatio so the overlay pixel space matches the
+                          // displayed video pixel space exactly (no letterbox offset).
                           Expanded(
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                _videoInitialized
-                                    ? Center(
-                                        child: AspectRatio(
-                                          aspectRatio:
-                                              _videoController.value.aspectRatio,
-                                          child: VideoPlayer(_videoController),
-                                        ),
-                                      )
-                                    : const Center(
-                                        child: CircularProgressIndicator(
-                                            color: Colors.white54),
+                            child: _videoInitialized
+                                ? Center(
+                                    child: AspectRatio(
+                                      aspectRatio:
+                                          _videoController.value.aspectRatio,
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          VideoPlayer(_videoController),
+                                          if (frame != null)
+                                            LayoutBuilder(
+                                              builder: (ctx, constraints) {
+                                                // Scale focal length from original
+                                                // video pixels → display pixels so
+                                                // the projection stays correct.
+                                                final displayW =
+                                                    constraints.maxWidth;
+                                                final videoW = _videoController
+                                                    .value.size.width;
+                                                final scaledFl = videoW > 0
+                                                    ? widget.focalLength *
+                                                        (displayW / videoW)
+                                                    : widget.focalLength;
+                                                return Opacity(
+                                                  opacity: 0.65,
+                                                  child: MeshViewer(
+                                                    frame: frame,
+                                                    overlay: true,
+                                                    focalLength: scaledFl,
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                        ],
                                       ),
-                                Opacity(
-                                  opacity: 0.65,
-                                  child: frame != null
-                                      ? MeshViewer(
-                                          frame: frame,
-                                          overlay: true,
-                                          focalLength: widget.focalLength,
-                                        )
-                                      : const SizedBox.shrink(),
-                                ),
-                              ],
-                            ),
+                                    ),
+                                  )
+                                : const Center(
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white54),
+                                  ),
                           ),
                         ] else ...[
                           if (_showVideo) ...[

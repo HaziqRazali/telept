@@ -267,12 +267,15 @@ class _MeshPainter extends CustomPainter {
 /// Projects SMPL vertices onto the canvas using the camera translation stored
 /// in [frame.camT] and the focal length from the server.
 ///
-/// Coordinate convention (matches the SMPL FK output):
-///   X – right,  Y – up,  Z – toward viewer
+/// Coordinate convention: SMPL FK space — X right, Y up, Z backward.
+/// This matches what renderer.py does: it applies R_x(180°) to the MHR mesh
+/// (Y_mhr → −Y, Z_mhr → −Z) before handing it to pyrender, and places the
+/// camera at (−tx, ty, tz).  Depth = tz − Z_smpl.
 ///
-/// Perspective projection:
-///   x_screen = fx * (X + tx) / (Z + tz) + cx
-///   y_screen = cy - fy * (Y + ty) / (Z + tz)   ← flip Y for screen
+/// Perspective projection (matches renderer.py exactly):
+///   depth     = tz - Z                          (positive for visible verts)
+///   x_screen  = fx * (X + tx) / depth + cx
+///   y_screen  = cy - fy * (Y - ty) / depth      (screen Y-down, NDC Y-up)
 class _MeshPainterProjected extends CustomPainter {
   final MeshFrame frame;
   final double focalLength;
@@ -306,7 +309,14 @@ class _MeshPainterProjected extends CustomPainter {
       final Y = frame.vertices[i * 3 + 1];
       final Z = frame.vertices[i * 3 + 2];
 
-      final dz = Z + tz;
+      // Correct perspective projection matching the Python renderer.py:
+      //   vertices are in SMPL FK space (Y-up, Z-backward).
+      //   renderer.py applies R_x(180°) to the mesh (Y_smpl = -Y_mhr, Z_smpl = -Z_mhr),
+      //   places the camera at (-tx, ty, tz) and looks along -Z.
+      //   depth = tz - Z_smpl  (= tz + Z_mhr, positive for visible vertices)
+      //   projX = fx*(X + tx) / depth + cx
+      //   projY = cy - fy*(Y - ty) / depth   (screen Y-down, NDC Y-up)
+      final dz = tz - Z; // depth: tz - Z_smpl
       if (dz.abs() < 1e-6) {
         projX[i] = cx;
         projY[i] = cy;
@@ -314,7 +324,7 @@ class _MeshPainterProjected extends CustomPainter {
         continue;
       }
       projX[i] = (fx * (X + tx) / dz + cx).toDouble();
-      projY[i] = (cy - fy * (Y + ty) / dz).toDouble();
+      projY[i] = (cy - fy * (Y - ty) / dz).toDouble();
       projZ[i] = dz;
     }
 

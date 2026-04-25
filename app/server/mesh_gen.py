@@ -471,9 +471,12 @@ def generate_sam3d_params(
     n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     img_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or 1920
     img_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
-    # Estimate focal length (pixels) assuming 60° horizontal FOV.
+    # Focal length fallback: SAM3DBody's own default when no FOV estimator is used
+    # (see prepare_batch.py: focal = sqrt(h^2 + w^2)).
+    # Overwritten with the actual model output values once valid frames arrive.
     import math as _math
-    focal_length = (img_w / 2.0) / _math.tan(_math.radians(30.0))
+    focal_length = _math.sqrt(float(img_w) ** 2 + float(img_h) ** 2)
+    focal_lengths_collected: List[float] = []
 
     if progress_callback:
         progress_callback(0, n_frames)
@@ -518,6 +521,14 @@ def generate_sam3d_params(
                 if o.get("bbox") is not None
                 else float("inf"),
             )
+
+        # Collect real focal length from the model output (set by FOV estimator or
+        # SAM3DBody's default cam_int).  Use a running mean so streaming callbacks
+        # always have the best available estimate.
+        if best_output is not None and best_output.get("focal_length") is not None:
+            fl = float(np.atleast_1d(best_output["focal_length"]).ravel()[0])
+            focal_lengths_collected.append(fl)
+            focal_length = float(np.mean(focal_lengths_collected))
 
         # Track raw output for potential retroactive processing.
         frame_outputs.append(best_output)
@@ -580,7 +591,8 @@ def generate_sam3d_params(
             params_list.append(row)
             valid_list.append(v)
             if frame_ready_callback:
-                frame_ready_callback(buf_idx, row, v, fps, focal_length) = np.stack(params_list, axis=0) if params_list else np.zeros((0, PARAMS_PER_FRAME), dtype=np.float32)
+                frame_ready_callback(buf_idx, row, v, fps, focal_length)
+    params_array = np.stack(params_list, axis=0) if params_list else np.zeros((0, PARAMS_PER_FRAME), dtype=np.float32)
     valid_array  = np.array(valid_list, dtype=np.uint8)
 
     print(f"[mesh_gen] Valid frames: {int(valid_array.sum())}/{actual_frames}")
