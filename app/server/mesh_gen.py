@@ -396,10 +396,10 @@ def _fk_and_mhr2smpl_single(
     """
     Run forward kinematics + MHR→SMPL conversion for a single frame.
 
-    Returns (params_row_f32[76], valid_u8).
-    Params layout: go(3) + body_pose(63) + betas(10).
+    Returns (params_row_f32[79], valid_u8).
+    Params layout: go(3) + body_pose(63) + betas(10) + cam_t(3).
     """
-    PARAMS_PER_FRAME = 76
+    PARAMS_PER_FRAME = 79
     params_row = np.zeros(PARAMS_PER_FRAME, dtype=np.float32)
 
     head   = estimator.model.head_pose
