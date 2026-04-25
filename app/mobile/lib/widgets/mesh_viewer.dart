@@ -22,16 +22,30 @@ import '../models/mesh_frame.dart';
 class MeshViewer extends StatefulWidget {
   final MeshFrame frame;
 
-  const MeshViewer({super.key, required this.frame});
+  /// When true: gestures are disabled and the mesh is projected using the
+  /// camera translation stored in [frame.camT] + [focalLength].
+  final bool overlay;
+
+  /// Focal length in pixels (from the server header).  Used only in overlay
+  /// mode.  0 means "estimate from widget size".
+  final double focalLength;
+
+  const MeshViewer({
+    super.key,
+    required this.frame,
+    this.overlay = false,
+    this.focalLength = 0.0,
+  });
 
   @override
   State<MeshViewer> createState() => _MeshViewerState();
 }
 
 class _MeshViewerState extends State<MeshViewer> {
-  // Default orientation: π around X flips SAM3DBody's Y-down/Z-away frame
-  // so the person appears right-side-up and front-facing.
-  static const double _defaultRotX = math.pi;
+  // Default orientation: no rotation.  mhr2smpl outputs go in Y-up /
+  // Z-toward-viewer space (after the [1,2]*=-1 flip in mesh_gen.py), so the
+  // rest pose already appears upright and front-facing with rotX = 0.
+  static const double _defaultRotX = 0.0;
   static const double _defaultRotY = 0.0;
   static const double _defaultZoom = 1.0;
 
@@ -52,6 +66,17 @@ class _MeshViewerState extends State<MeshViewer> {
 
   @override
   Widget build(BuildContext context) {
+    // In overlay mode: no interaction, no reset button, use perspective painter.
+    if (widget.overlay) {
+      return CustomPaint(
+        painter: _MeshPainterProjected(
+          frame: widget.frame,
+          focalLength: widget.focalLength,
+        ),
+        size: Size.infinite,
+      );
+    }
+
     return Stack(
       children: [
         GestureDetector(
@@ -163,7 +188,7 @@ class _MeshPainter extends CustomPainter {
       rotMat.transform3(v);
 
       projX[i] = cx + v.x * scale;
-      projY[i] = cy - v.y * scale; // flip Y for screen coords
+      projY[i] = cy - v.y * scale; // flip Y: FK verts are Y-up, screen is Y-down
       projZ[i] = v.z;
     }
 
@@ -233,4 +258,115 @@ class _MeshPainter extends CustomPainter {
   bool shouldRepaint(covariant _MeshPainter old) {
     return old.frame != frame || old.rotX != rotX || old.rotY != rotY || old.zoom != zoom;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Perspective projection painter  (overlay mode)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Projects SMPL vertices onto the canvas using the camera translation stored
+/// in [frame.camT] and the focal length from the server.
+///
+/// Coordinate convention (matches the SMPL FK output):
+///   X – right,  Y – up,  Z – toward viewer
+///
+/// Perspective projection:
+///   x_screen = fx * (X + tx) / (Z + tz) + cx
+///   y_screen = cy - fy * (Y + ty) / (Z + tz)   ← flip Y for screen
+class _MeshPainterProjected extends CustomPainter {
+  final MeshFrame frame;
+  final double focalLength;
+
+  _MeshPainterProjected({required this.frame, required this.focalLength});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (frame.vertices.isEmpty || frame.indices.isEmpty) return;
+
+    final cx = size.width  / 2;
+    final cy = size.height / 2;
+
+    // Use provided focal length or fall back to an estimate based on a 60° FOV.
+    final fx = focalLength > 0
+        ? focalLength
+        : size.width / (2 * math.tan(math.pi / 6)); // 60° horiz FOV
+    final fy = fx; // square pixels assumed
+
+    final tx = frame.camT[0];
+    final ty = frame.camT[1];
+    final tz = frame.camT[2];
+
+    final n = frame.vertexCount;
+    final projX = Float32List(n);
+    final projY = Float32List(n);
+    final projZ = Float32List(n);
+
+    for (int i = 0; i < n; i++) {
+      final X = frame.vertices[i * 3];
+      final Y = frame.vertices[i * 3 + 1];
+      final Z = frame.vertices[i * 3 + 2];
+
+      final dz = Z + tz;
+      if (dz.abs() < 1e-6) {
+        projX[i] = cx;
+        projY[i] = cy;
+        projZ[i] = 0;
+        continue;
+      }
+      projX[i] = (fx * (X + tx) / dz + cx).toDouble();
+      projY[i] = (cy - fy * (Y + ty) / dz).toDouble();
+      projZ[i] = dz;
+    }
+
+    final lightDir = vm.Vector3(0.3, 0.6, 1.0)..normalize();
+    final triCount = frame.indices.length ~/ 3;
+    final triDepth = Float32List(triCount);
+    final triOrder = List<int>.generate(triCount, (i) => i);
+
+    for (int t = 0; t < triCount; t++) {
+      final i0 = frame.indices[t * 3];
+      final i1 = frame.indices[t * 3 + 1];
+      final i2 = frame.indices[t * 3 + 2];
+      triDepth[t] = (projZ[i0] + projZ[i1] + projZ[i2]) / 3.0;
+    }
+    triOrder.sort((a, b) => triDepth[b].compareTo(triDepth[a])); // far→near
+
+    final path  = ui.Path();
+    final paint = Paint()..style = PaintingStyle.fill;
+    const baseColor = Color(0xFF5C8FE6);
+
+    for (final t in triOrder) {
+      final i0 = frame.indices[t * 3];
+      final i1 = frame.indices[t * 3 + 1];
+      final i2 = frame.indices[t * 3 + 2];
+
+      final vx0 = frame.vertices[i0 * 3], vy0 = frame.vertices[i0 * 3 + 1], vz0 = frame.vertices[i0 * 3 + 2];
+      final vx1 = frame.vertices[i1 * 3], vy1 = frame.vertices[i1 * 3 + 1], vz1 = frame.vertices[i1 * 3 + 2];
+      final vx2 = frame.vertices[i2 * 3], vy2 = frame.vertices[i2 * 3 + 1], vz2 = frame.vertices[i2 * 3 + 2];
+
+      final e1 = vm.Vector3(vx1 - vx0, vy1 - vy0, vz1 - vz0);
+      final e2 = vm.Vector3(vx2 - vx0, vy2 - vy0, vz2 - vz0);
+      final faceNormal = e1.cross(e2)..normalize();
+
+      final diffuse = math.max(0.0, faceNormal.dot(lightDir));
+      const ambient = 0.3;
+      final brightness = (ambient + diffuse * 0.7).clamp(0.0, 1.0);
+
+      final r = ((baseColor.r * 255.0).round() * brightness).round().clamp(0, 255);
+      final g = ((baseColor.g * 255.0).round() * brightness).round().clamp(0, 255);
+      final b = ((baseColor.b * 255.0).round() * brightness).round().clamp(0, 255);
+      paint.color = Color.fromARGB(255, r, g, b);
+
+      path.reset();
+      path.moveTo(projX[i0], projY[i0]);
+      path.lineTo(projX[i1], projY[i1]);
+      path.lineTo(projX[i2], projY[i2]);
+      path.close();
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MeshPainterProjected old) =>
+      old.frame != frame || old.focalLength != focalLength;
 }

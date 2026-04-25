@@ -131,6 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
             streamingFps: fps,
             videoPath: videoPath,
             totalFramesNotifier: totalFramesNotifier,
+            focalLength: initialParams.focalLength,
           ),
         ),
       );
@@ -167,6 +168,7 @@ class _HomeScreenState extends State<HomeScreen> {
           go: params.go(i),
           bodyPose: params.bodyPose(i),
           betas: params.betas(i),
+          camT: params.camT(i),
         ));
       } else {
         frames.add(smpl.forward(

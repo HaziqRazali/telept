@@ -205,10 +205,11 @@ async def process_video_params(video: UploadFile = File(...)):
             "error": None,
             "mode": "params",
             # Streaming buffers – appended as frames become ready.
-            "params_buffer": bytearray(),  # N × 76 × 4 bytes
+            "params_buffer": bytearray(),  # N × 79 × 4 bytes
             "valid_buffer":  bytearray(),  # N × 1 byte
             "params_frames_ready": 0,
             "fps": 0.0,
+            "focal_length": 0.0,
         }
 
     def _run():
@@ -218,7 +219,7 @@ async def process_video_params(video: UploadFile = File(...)):
                     _jobs[job_id]["frames_done"] = frames_done
                     _jobs[job_id]["total_frames"] = total_frames
 
-            def _frame_ready(frame_idx: int, params_row, valid: int, fps: float):
+            def _frame_ready(frame_idx: int, params_row, valid: int, fps: float, focal_length: float = 0.0):
                 with _jobs_lock:
                     job = _jobs[job_id]
                     job["params_buffer"] += params_row.astype("float32").tobytes()
@@ -226,6 +227,8 @@ async def process_video_params(video: UploadFile = File(...)):
                     job["params_frames_ready"] += 1
                     if job["fps"] == 0.0:
                         job["fps"] = fps
+                    if job["focal_length"] == 0.0 and focal_length > 0.0:
+                        job["focal_length"] = focal_length
 
             t0 = time.time()
             if USE_SAM3D:
@@ -241,10 +244,10 @@ async def process_video_params(video: UploadFile = File(...)):
                 fps = cap.get(_cv2.CAP_PROP_FPS) or 30.0
                 n_frames = max(1, int(cap.get(_cv2.CAP_PROP_FRAME_COUNT)))
                 cap.release()
-                PARAMS_PER_FRAME = 76
+                PARAMS_PER_FRAME = 79
                 zero_row = _np.zeros(PARAMS_PER_FRAME, dtype=_np.float32)
                 for i in range(n_frames):
-                    _frame_ready(i, zero_row, 1, fps)
+                    _frame_ready(i, zero_row, 1, fps, focal_length=0.0)
                     _progress(i + 1, n_frames)
                 bin_path = None  # not used; result reconstructed from buffer
 
@@ -368,7 +371,7 @@ async def get_result_params_partial(job_id: str, from_frame: int = 0):
 # ---------------------------------------------------------------------------
 import struct as _struct
 
-_PARAMS_PER_FRAME = 76
+_PARAMS_PER_FRAME = 79
 _PARAMS_BYTES     = _PARAMS_PER_FRAME * 4  # float32
 _MAGIC            = 0x534D504C  # 'SMPL'
 
@@ -384,6 +387,7 @@ def _build_params_binary(job: dict, from_frame: int) -> bytearray:
     with _jobs_lock:
         frames_ready = job["params_frames_ready"]
         fps          = job["fps"]
+        focal_length = job["focal_length"]
         # Take a snapshot of the bytes we need (avoids holding lock during Response).
         start_byte   = from_frame * _PARAMS_BYTES
         end_byte     = frames_ready * _PARAMS_BYTES
@@ -396,6 +400,7 @@ def _build_params_binary(job: dict, from_frame: int) -> bytearray:
     out += _struct.pack("<I", count)
     out += _struct.pack("<I", _PARAMS_PER_FRAME)
     out += _struct.pack("<f", float(fps))
+    out += _struct.pack("<f", float(focal_length))
     out += params_slice
     out += valid_slice
     return out

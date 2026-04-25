@@ -29,11 +29,16 @@ class ViewerScreen extends StatefulWidget {
     required this.videoPath,
   })  : framesNotifier = null,
         streamingFps = null,
-        totalFramesNotifier = null;
+        totalFramesNotifier = null,
+        focalLength = 0.0;
 
   /// Total expected frame count for the full video (used for the buffer track).
   /// Updated by the home screen's polling loop as total_frames becomes known.
   final ValueNotifier<int>? totalFramesNotifier;
+
+  /// Focal length in pixels from the server (used for perspective projection
+  /// in overlay mode).  0 when unknown (uses a FOV-based fallback).
+  final double focalLength;
 
   /// Streaming constructor: frames arrive incrementally via [framesNotifier].
   const ViewerScreen.streaming({
@@ -42,6 +47,7 @@ class ViewerScreen extends StatefulWidget {
     required double this.streamingFps,
     required this.videoPath,
     this.totalFramesNotifier,
+    this.focalLength = 0.0,
   }) : result = null;
 
   @override
@@ -54,12 +60,22 @@ class _ViewerScreenState extends State<ViewerScreen>
   bool _showVideo = true;
   bool _showMesh = true;
   bool _showChat = false;
+  bool _overlayMesh = false;
 
   int get _visibleCount =>
       (_showVideo ? 1 : 0) + (_showMesh ? 1 : 0) + (_showChat ? 1 : 0);
 
   void _toggle(String panel) {
     setState(() {
+      if (panel == 'overlay') {
+        _overlayMesh = !_overlayMesh;
+        // Overlay requires both video and mesh to be on.
+        if (_overlayMesh) {
+          _showVideo = true;
+          _showMesh = true;
+        }
+        return;
+      }
       final wouldHide = switch (panel) {
         'video' => _showVideo,
         'mesh' => _showMesh,
@@ -71,8 +87,10 @@ class _ViewerScreenState extends State<ViewerScreen>
       switch (panel) {
         case 'video':
           _showVideo = !_showVideo;
+          if (!_showVideo) _overlayMesh = false;
         case 'mesh':
           _showMesh = !_showMesh;
+          if (!_showMesh) _overlayMesh = false;
         case 'chat':
           _showChat = !_showChat;
       }
@@ -255,6 +273,7 @@ class _ViewerScreenState extends State<ViewerScreen>
                     showVideo: _showVideo,
                     showMesh: _showMesh,
                     showChat: _showChat,
+                    overlayMesh: _overlayMesh,
                     onToggle: _toggle,
                   ),
 
@@ -264,35 +283,68 @@ class _ViewerScreenState extends State<ViewerScreen>
                   Expanded(
                     child: Row(
                       children: [
-                        if (_showVideo) ...[
+                        if (_overlayMesh && _showVideo && _showMesh) ...[
+                          // Overlay mode: mesh drawn semi-transparently over video.
                           Expanded(
-                            child: _videoInitialized
-                                ? Center(
-                                    child: AspectRatio(
-                                      aspectRatio:
-                                          _videoController.value.aspectRatio,
-                                      child: VideoPlayer(_videoController),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                _videoInitialized
+                                    ? Center(
+                                        child: AspectRatio(
+                                          aspectRatio:
+                                              _videoController.value.aspectRatio,
+                                          child: VideoPlayer(_videoController),
+                                        ),
+                                      )
+                                    : const Center(
+                                        child: CircularProgressIndicator(
+                                            color: Colors.white54),
+                                      ),
+                                Opacity(
+                                  opacity: 0.65,
+                                  child: frame != null
+                                      ? MeshViewer(
+                                          frame: frame,
+                                          overlay: true,
+                                          focalLength: widget.focalLength,
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ] else ...[
+                          if (_showVideo) ...[
+                            Expanded(
+                              child: _videoInitialized
+                                  ? Center(
+                                      child: AspectRatio(
+                                        aspectRatio:
+                                            _videoController.value.aspectRatio,
+                                        child: VideoPlayer(_videoController),
+                                      ),
+                                    )
+                                  : const Center(
+                                      child: CircularProgressIndicator(
+                                          color: Colors.white54),
                                     ),
-                                  )
-                                : const Center(
-                                    child: CircularProgressIndicator(
-                                        color: Colors.white54),
-                                  ),
-                          ),
-                          if (_showMesh || _showChat)
-                            Container(width: 1, color: Colors.white12),
-                        ],
-                        if (_showMesh) ...[
-                          Expanded(
-                            child: frame != null
-                                ? MeshViewer(frame: frame)
-                                : const Center(
-                                    child: CircularProgressIndicator(
-                                        color: Colors.white54),
-                                  ),
-                          ),
-                          if (_showChat)
-                            Container(width: 1, color: Colors.white12),
+                            ),
+                            if (_showMesh || _showChat)
+                              Container(width: 1, color: Colors.white12),
+                          ],
+                          if (_showMesh) ...[
+                            Expanded(
+                              child: frame != null
+                                  ? MeshViewer(frame: frame)
+                                  : const Center(
+                                      child: CircularProgressIndicator(
+                                          color: Colors.white54),
+                                    ),
+                            ),
+                            if (_showChat)
+                              Container(width: 1, color: Colors.white12),
+                          ],
                         ],
                         if (_showChat)
                           const Expanded(child: ChatPanel()),
@@ -345,12 +397,14 @@ class _SideRail extends StatelessWidget {
   final bool showVideo;
   final bool showMesh;
   final bool showChat;
+  final bool overlayMesh;
   final void Function(String) onToggle;
 
   const _SideRail({
     required this.showVideo,
     required this.showMesh,
     required this.showChat,
+    required this.overlayMesh,
     required this.onToggle,
   });
 
@@ -376,6 +430,14 @@ class _SideRail extends StatelessWidget {
             active: showMesh,
             activeColor: Colors.green[300]!,
             onTap: () => onToggle('mesh'),
+          ),
+          const SizedBox(height: 8),
+          _RailButton(
+            icon: Icons.layers,
+            label: 'Overlay',
+            active: overlayMesh,
+            activeColor: Colors.orange[300]!,
+            onTap: () => onToggle('overlay'),
           ),
           const SizedBox(height: 8),
           _RailButton(

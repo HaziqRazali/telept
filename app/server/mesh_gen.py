@@ -329,8 +329,7 @@ def generate_sam3d_meshes(
                 scales, mean_shape_t, exprs,
                 return_keypoints=False,
             )
-            verts_batch[..., [1, 2]] *= -1  # same camera-system flip as postprocess_ik
-            verts_np = verts_batch.cpu().numpy()  # (B, V, 3)
+            verts_np = verts_batch.cpu().numpy()  # (B, V, 3)  -- no flip, raw camera space
 
         for batch_i, frame_i in enumerate(valid_indices):
             frame_outputs[frame_i]["pred_vertices"] = verts_np[batch_i]
@@ -422,8 +421,7 @@ def _fk_and_mhr2smpl_single(
             scales, mean_shape_t, exprs,
             return_keypoints=False,
         )
-        verts_batch[..., [1, 2]] *= -1
-        verts_np = verts_batch[0].cpu().numpy()  # (V, 3)
+        verts_np = verts_batch[0].cpu().numpy()  # (V, 3)  -- no flip, raw camera space
 
     if output.get("pred_cam_t") is None:
         return params_row, 0
@@ -432,6 +430,7 @@ def _fk_and_mhr2smpl_single(
     params_row[:3]    = go.astype(np.float32)
     params_row[3:66]  = body_pose.astype(np.float32)
     params_row[66:76] = betas.astype(np.float32)
+    params_row[76:79] = np.asarray(output["pred_cam_t"], dtype=np.float32).ravel()[:3]
     return params_row, 1
 
 
@@ -470,6 +469,11 @@ def generate_sam3d_params(
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    img_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or 1920
+    img_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
+    # Estimate focal length (pixels) assuming 60° horizontal FOV.
+    import math as _math
+    focal_length = (img_w / 2.0) / _math.tan(_math.radians(30.0))
 
     if progress_callback:
         progress_callback(0, n_frames)
@@ -483,7 +487,7 @@ def generate_sam3d_params(
     valid_shape_count = 0
 
     # Final params arrays (filled either eagerly or in the post-loop pass).
-    PARAMS_PER_FRAME = 76
+    PARAMS_PER_FRAME = 79  # go(3) + body_pose(63) + betas(10) + cam_t(3)
     params_list: List[np.ndarray] = []  # one (76,) row per frame, in order
     valid_list:  List[int]        = []
 
@@ -541,9 +545,7 @@ def generate_sam3d_params(
                 params_list.append(row)
                 valid_list.append(v)
                 if frame_ready_callback:
-                    frame_ready_callback(buf_idx, row, v, fps)
-
-        elif mean_shape is not None:
+                    frame_ready_callback(buf_idx, row, v, fps, focal_length)
             # Process this frame immediately.
             if best_output is not None and best_output.get("shape_params") is not None:
                 row, v = _fk_and_mhr2smpl_single(estimator, mhr2smpl, best_output, mean_shape)
@@ -552,9 +554,7 @@ def generate_sam3d_params(
             params_list.append(row)
             valid_list.append(v)
             if frame_ready_callback:
-                frame_ready_callback(idx, row, v, fps)
-
-        idx += 1
+                frame_ready_callback(idx, row, v, fps, focal_length)
         if progress_callback:
             progress_callback(idx, n_frames)
 
@@ -580,9 +580,7 @@ def generate_sam3d_params(
             params_list.append(row)
             valid_list.append(v)
             if frame_ready_callback:
-                frame_ready_callback(buf_idx, row, v, fps)
-
-    params_array = np.stack(params_list, axis=0) if params_list else np.zeros((0, PARAMS_PER_FRAME), dtype=np.float32)
+                frame_ready_callback(buf_idx, row, v, fps, focal_length) = np.stack(params_list, axis=0) if params_list else np.zeros((0, PARAMS_PER_FRAME), dtype=np.float32)
     valid_array  = np.array(valid_list, dtype=np.uint8)
 
     print(f"[mesh_gen] Valid frames: {int(valid_array.sum())}/{actual_frames}")
@@ -595,6 +593,7 @@ def generate_sam3d_params(
         f.write(struct.pack("<I", actual_frames))
         f.write(struct.pack("<I", PARAMS_PER_FRAME))
         f.write(struct.pack("<f", fps))
+        f.write(struct.pack("<f", focal_length))
         f.write(params_array.tobytes())
         f.write(valid_array.tobytes())
 

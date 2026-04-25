@@ -9,10 +9,15 @@ class MeshFrame {
   /// Vertex normals (per-vertex, flat). If empty, compute flat normals.
   final List<double> normals;
 
+  /// Camera-space translation [tx, ty, tz] for perspective projection.
+  /// [0, 0, 0] when not available (e.g. stub / invalid frame).
+  final List<double> camT;
+
   const MeshFrame({
     required this.vertices,
     required this.indices,
     this.normals = const [],
+    this.camT = const [0.0, 0.0, 0.0],
   });
 
   int get vertexCount => vertices.length ~/ 3;

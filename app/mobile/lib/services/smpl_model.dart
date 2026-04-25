@@ -205,6 +205,7 @@ class SmplModel {
     required List<double> go,
     required List<double> bodyPose,
     required List<double> betas,
+    List<double> camT = const [0.0, 0.0, 0.0],
   }) {
     assert(_loaded, 'SmplModel.load() must be called first');
 
@@ -258,20 +259,11 @@ class SmplModel {
       _axisAngleToRotMat(ax, ay, az, rotMats, j * 9);
     }
 
-    // mhr2smpl outputs global orient in camera space (Y-down, Z-into-screen).
-    // SMPL renders in Y-up space. Correct by pre-multiplying the root rotation
-    // by R_x(180°) = diag(1, -1, -1), which changes the coordinate frame:
-    //   R_new = R_x(180°) * R_go
-    // This negates rows 1 and 2 of the rotation matrix (row-major):
-    //   [r0, r1, r2]      [ r0,  r1,  r2]
-    //   [r3, r4, r5]  →   [-r3, -r4, -r5]
-    //   [r6, r7, r8]      [-r6, -r7, -r8]
-    rotMats[3] = -rotMats[3];
-    rotMats[4] = -rotMats[4];
-    rotMats[5] = -rotMats[5];
-    rotMats[6] = -rotMats[6];
-    rotMats[7] = -rotMats[7];
-    rotMats[8] = -rotMats[8];
+    // No correction needed: mhr2smpl receives MHR vertices that have already
+    // had [Y,Z] flipped (verts_batch[..., [1,2]] *= -1 in mesh_gen.py), so its
+    // output `go` is already in Y-up / Z-toward-viewer space — the same space
+    // the SMPL model and mesh viewer use.  Applying any extra rotation here
+    // corrupts non-trivial poses (e.g. forward bends appear mirrored).
 
     // 5. FK: compute world transform T[j] = [R|t] for each joint (4×4 matrices)
     //    T[j] = T[parent(j)] * T_local[j]
@@ -358,6 +350,7 @@ class SmplModel {
     return MeshFrame(
       vertices: List<double>.unmodifiable(vPosed),
       indices: List<int>.unmodifiable(_faces),
+      camT: camT,
     );
   }
 
