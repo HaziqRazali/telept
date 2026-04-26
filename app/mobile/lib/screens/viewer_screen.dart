@@ -595,13 +595,24 @@ class _SensorPanel extends StatelessWidget {
                 isVisible: true,
                 textStyle: TextStyle(color: Colors.white54, fontSize: 10),
               ),
-              primaryXAxis: const NumericAxis(
-                title: AxisTitle(
+              primaryXAxis: NumericAxis(
+                title: const AxisTitle(
                     text: 'Time (s)',
                     textStyle: TextStyle(color: Colors.white54, fontSize: 10)),
-                labelStyle: TextStyle(color: Colors.white54, fontSize: 10),
-                majorGridLines: MajorGridLines(width: 0.3, color: Colors.white12),
-                axisLine: AxisLine(color: Colors.white24),
+                labelStyle:
+                    const TextStyle(color: Colors.white54, fontSize: 10),
+                majorGridLines:
+                    const MajorGridLines(width: 0.3, color: Colors.white12),
+                axisLine: const AxisLine(color: Colors.white24),
+                plotBands: [
+                  PlotBand(
+                    isVisible: true,
+                    start: _cursorSec,
+                    end: _cursorSec,
+                    borderWidth: 2,
+                    borderColor: Colors.white70,
+                  ),
+                ],
               ),
               primaryYAxis: const NumericAxis(
                 name: 'Force',
@@ -626,18 +637,6 @@ class _SensorPanel extends StatelessWidget {
                       TextStyle(color: Colors.orangeAccent, fontSize: 10),
                   majorGridLines: MajorGridLines(width: 0),
                   axisLine: AxisLine(color: Colors.white24),
-                ),
-              ],
-              annotations: [
-                CartesianChartAnnotation(
-                  widget: const SizedBox(
-                    width: 1.5,
-                    child: ColoredBox(color: Colors.white70),
-                  ),
-                  coordinateUnit: CoordinateUnit.point,
-                  x: _cursorSec,
-                  y: 0,
-                  verticalAlignment: ChartAlignment.near,
                 ),
               ],
               series: [

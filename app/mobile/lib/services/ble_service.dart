@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:flutter/material.dart' hide ConnectionState;
+import 'package:permission_handler/permission_handler.dart';
 
 import '../config.dart';
 import '../models/sensor_sample.dart';
@@ -71,8 +72,12 @@ class BleService {
 
   final ValueNotifier<bool> isConnected = ValueNotifier(false);
 
+  /// Notifier updated every time the discovered device list changes.
+  final ValueNotifier<int> scanResultsCount = ValueNotifier(0);
+
   bool _working = false;
   bool _stopped = false;
+  bool _scanning = false;
 
   final List<DiscoveredEventArgs> _devList = [];
   final Map<BleDataSource, Peripheral> _dsPeripherals = {};
@@ -93,7 +98,7 @@ class BleService {
     if (_working) return;
     _working = true;
     _stopped = false;
-    _startLoop(ctx).whenComplete(() {
+    _startLoop().whenComplete(() {
       _working = false;
     });
   }
@@ -119,19 +124,69 @@ class BleService {
     return result;
   }
 
+  // ── Source management ─────────────────────────────────────────────────────
+
+  List<BleDataSource> get configuredSources => List.unmodifiable(_rdevs);
+
+  bool isSourceConnected(BleDataSource ds) => _dsPeripherals.containsKey(ds);
+
+  Future<void> removeSource(BleDataSource ds) async {
+    if (_dsPeripherals.containsKey(ds)) {
+      try { await _manager.disconnect(_dsPeripherals[ds]!); } catch (_) {}
+      _dsPeripherals.remove(ds);
+    }
+    _rdevs.remove(ds);
+    await AppConfig.setBleDevicesJson(BleDataSource.listToJson(_rdevs));
+    _updateConnected();
+  }
+
+  Future<void> addSource(BleDataSource ds) async {
+    if (_rdevs.any((r) => r.serviceID == ds.serviceID && r.charID == ds.charID)) return;
+    _rdevs.add(ds);
+    await AppConfig.setBleDevicesJson(BleDataSource.listToJson(_rdevs));
+    // Restart loop so the new source is picked up
+    if (!_working) {
+      _working = true;
+      _stopped = false;
+      _startLoop().whenComplete(() => _working = false);
+    }
+  }
+
+  Future<void> triggerScan() => _discoverDevices();
+
   // ── Internal ──────────────────────────────────────────────────────────────
 
   Future<void> _discoverDevices() async {
-    try {
-      await _manager.startDiscovery();
-      await Future.delayed(const Duration(seconds: 4));
-      await _manager.stopDiscovery();
-    } catch (_) {}
+    if (_scanning) return;
+    _scanning = true;
+
+    // Request Bluetooth permission (mirrors icam; required on iOS and Android)
+    if (Platform.isAndroid || Platform.isIOS) {
+      await Permission.bluetooth.request();
+    }
+
+    // Stop any lingering discovery before starting fresh
+    try { await _manager.stopDiscovery(); } catch (_) {}
+
+    // Retry startDiscovery up to 10 times with 2-second back-off (mirrors icam)
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      for (int i = 0; i < 10; i++) {
+        try {
+          await _manager.startDiscovery();
+          break;
+        } catch (_) {
+          await Future.delayed(const Duration(seconds: 2));
+        }
+      }
+      // Let scan run for 10 s, then stop and release the guard
+      await Future.delayed(const Duration(seconds: 10));
+      try { await _manager.stopDiscovery(); } catch (_) {}
+      _scanning = false;
+    });
   }
 
-  Future<void> _startLoop(BuildContext ctx) async {
+  Future<void> _startLoop() async {
     _rdevs = BleDataSource.listFromJson(AppConfig.bleDevicesJson);
-    if (_rdevs.isEmpty) return;
 
     final Map<Peripheral, _DeviceStats> mapDevTimes = {};
     int rt0 = DateTime.now().millisecondsSinceEpoch;
@@ -151,6 +206,7 @@ class BleService {
         } else {
           _devList[index] = args;
         }
+        scanResultsCount.value = _devList.length;
 
         for (final ds in _rdevs) {
           if (_dsPeripherals[ds] == null &&
@@ -213,11 +269,11 @@ class BleService {
     await _discoverDevices();
 
     while (!_stopped) {
-      if (_devList.isEmpty &&
+      // Rescan if we have configured sources that haven't been found yet
+      if (_rdevs.isNotEmpty &&
           !_rdevs.every((ds) => _dsPeripherals.containsKey(ds))) {
         await _discoverDevices();
         await Future.delayed(const Duration(seconds: 2));
-        if (_devList.isEmpty) continue;
       }
 
       final tnow = DateTime.now().millisecondsSinceEpoch;
@@ -269,10 +325,237 @@ class BleService {
     await _stateSub?.cancel();
     _dsPeripherals.clear();
     _devList.clear();
+    scanResultsCount.value = 0;
     _updateConnected();
   }
 
   void _updateConnected() {
     isConnected.value = _dsPeripherals.isNotEmpty;
+  }
+
+  // ── BLE setup dialog (mirrors icam's showBLEDialog) ──────────────────────
+
+  /// Opens the BLE management dialog: shows configured sources, lets user
+  /// delete them or add new ones by scanning.
+  Future<void> showBleDialog(BuildContext ctx) async {
+    if (!_working) {
+      _working = true;
+      _stopped = false;
+      _startLoop().whenComplete(() => _working = false);
+    }
+
+    // ── Step 1: show currently configured sources ─────────────────────
+    if (_rdevs.isNotEmpty && ctx.mounted) {
+      final addNew = await showDialog<bool>(
+        context: ctx,
+        builder: (context) => StatefulBuilder(
+          builder: (ctx2, setState) => AlertDialog(
+            title: const Text('BLE Sensor Sources'),
+            content: SizedBox(
+              width: MediaQuery.of(context).size.width * 0.8,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _rdevs.length,
+                itemBuilder: (_, i) {
+                  final ds = _rdevs[i];
+                  final connected = _dsPeripherals.containsKey(ds);
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.bluetooth,
+                        color: connected ? Colors.greenAccent : Colors.grey,
+                      ),
+                      title: Text(ds.name),
+                      subtitle: Text(
+                        'Service: ${ds.serviceID}\nChar: ${ds.charID}',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () async {
+                          await removeSource(ds);
+                          setState(() {});
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx2, false),
+                child: const Text('Close'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx2, true),
+                child: const Text('Add device'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (addNew != true) return;
+    }
+
+    if (!ctx.mounted) return;
+
+    // ── Step 2: show discovered devices (live-updating) ───────────────
+    _devList.clear();
+    scanResultsCount.value = 0;
+    unawaited(_discoverDevices());
+
+    final selectedIndex = await showDialog<int>(
+      context: ctx,
+      builder: (context) => ValueListenableBuilder<int>(
+        valueListenable: scanResultsCount,
+        builder: (_, __, ___) => AlertDialog(
+          title: Text('Scanning... (${_devList.length} found)'),
+          content: SizedBox(
+            width: MediaQuery.of(context).size.width * 0.8,
+            child: _devList.isEmpty
+                ? const SizedBox(
+                    height: 80,
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _devList.length,
+                    itemBuilder: (_, i) {
+                      final dev = _devList[i];
+                      return ListTile(
+                        leading: const Icon(Icons.bluetooth_searching),
+                        title: Text(dev.advertisement.name ?? 'Unknown'),
+                        subtitle: Text(dev.peripheral.uuid.toString()),
+                        onTap: () => Navigator.of(context).pop(i),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                _devList.clear();
+                scanResultsCount.value = 0;
+                unawaited(_discoverDevices());
+              },
+              child: const Text('Re-scan'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (selectedIndex == null || !ctx.mounted) return;
+
+    final selectedPeripheral = _devList[selectedIndex].peripheral;
+
+    // ── Step 3: connect and discover GATT ────────────────────────────
+    if (ctx.mounted) {
+      showDialog(
+        context: ctx,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    Object? connectErr;
+    List<GATTService> services = [];
+    try {
+      try { await _manager.connect(selectedPeripheral); } catch (_) {}
+      services = await _manager.discoverGATT(selectedPeripheral);
+    } catch (e) {
+      connectErr = e;
+    } finally {
+      if (ctx.mounted && Navigator.canPop(ctx)) Navigator.of(ctx).pop();
+    }
+
+    if (connectErr != null || services.isEmpty || !ctx.mounted) return;
+
+    // ── Step 4: pick a service ────────────────────────────────────────
+    final serviceIndex = await showDialog<int>(
+      context: ctx,
+      builder: (context) => AlertDialog(
+        title: const Text('Select service'),
+        content: SizedBox(
+          width: MediaQuery.of(context).size.width * 0.8,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: services.length,
+            itemBuilder: (_, i) => ListTile(
+              title: Text(services[i].uuid.toString()),
+              onTap: () => Navigator.pop(context, i),
+            ),
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))],
+      ),
+    );
+    if (serviceIndex == null || !ctx.mounted) return;
+
+    final selectedService = services[serviceIndex];
+    final chars = selectedService.characteristics;
+
+    // ── Step 5: pick a characteristic ────────────────────────────────
+    final charIndex = await showDialog<int>(
+      context: ctx,
+      builder: (context) => AlertDialog(
+        title: const Text('Select characteristic'),
+        content: SizedBox(
+          width: MediaQuery.of(context).size.width * 0.8,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: chars.length,
+            itemBuilder: (_, i) => ListTile(
+              title: Text(chars[i].uuid.toString()),
+              onTap: () => Navigator.pop(context, i),
+            ),
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))],
+      ),
+    );
+    if (charIndex == null || !ctx.mounted) return;
+
+    // ── Step 6: give it a name and save ──────────────────────────────
+    final nameController = TextEditingController(
+        text: _devList[selectedIndex].advertisement.name ?? 'Sensor');
+    final confirmed = await showDialog<bool>(
+      context: ctx,
+      builder: (context) => AlertDialog(
+        title: const Text('Name this sensor'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            labelText: 'Name',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await addSource(BleDataSource(
+      name: nameController.text.trim().isEmpty
+          ? (_devList[selectedIndex].advertisement.name ?? 'Sensor')
+          : nameController.text.trim(),
+      serviceID: selectedService.uuid.toString(),
+      charID: chars[charIndex].uuid.toString(),
+    ));
+
+    if (ctx.mounted) {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(content: Text('Sensor "${nameController.text.trim()}" saved.')),
+      );
+    }
   }
 }

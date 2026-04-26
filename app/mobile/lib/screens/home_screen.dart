@@ -345,16 +345,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ValueListenableBuilder<bool>(
             valueListenable: bleService.isConnected,
             builder: (_, connected, __) {
-              return Tooltip(
-                message: connected ? 'Sensor connected' : 'Sensor not connected',
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Icon(
-                    Icons.bluetooth,
-                    color: connected ? Colors.greenAccent : Colors.grey,
-                    size: 22,
-                  ),
+              return IconButton(
+                tooltip: connected ? 'Sensor connected – tap to manage' : 'No sensor – tap to add',
+                icon: Icon(
+                  Icons.bluetooth,
+                  color: connected ? Colors.greenAccent : Colors.grey,
                 ),
+                onPressed: () => bleService.showBleDialog(context),
               );
             },
           ),
