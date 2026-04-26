@@ -188,9 +188,10 @@ class MhrModel {
   ///
   /// [modelParams] – model_parameters[204] as output by FastSAM3DBody.
   ///   Layout: [global_trans*10(3), global_rot_euler(3), body_pose_euler(130), scales(68)]
-  /// [camT] – camera-space translation [tx, ty, tz] in centimetres.
+  /// [camT] – camera-space translation [tx, ty, tz] in metres (as output by
+  ///   the server's SAM3DBody pipeline).
   ///
-  /// Returns a [MeshFrame] with LOD3 vertices and faces.
+  /// Returns a [MeshFrame] with LOD3 vertices (in metres) and faces.
   MeshFrame forward({
     required Float32List modelParams,
     List<double> camT = const [0.0, 0.0, 0.0],
@@ -210,15 +211,15 @@ class MhrModel {
     // Step 3: build skinning matrices M[j] = G[j] @ ibp[j]
     final skinMats = _buildSkinMats(skelState);  // [127 * 16]
 
-    // Step 4: LBS skinning
-    final verts = _lbs(skinMats);               // [nVerts * 3]
+    // Step 4: LBS skinning — output is in centimetres (pymomentum native scale)
+    final verts = _lbs(skinMats);               // [nVerts * 3], cm
 
     // Convert centimetres → metres to match cam_t units from the server.
-    // The server's cam_t is in the same scale as the raw MHR output (cm).
-    // We keep cm here and let the mesh viewer handle projection uniformly.
-
+    // The Python pipeline does:  curr_skinned_verts = mhr_output * 0.01
+    // pred_cam_t is therefore in metres.  We apply the same scale here so
+    // that (vertex_m + cam_t_m) / depth_m gives correct pixel coordinates.
     return MeshFrame(
-      vertices: List<double>.generate(_nVerts * 3, (i) => verts[i]),
+      vertices: List<double>.generate(_nVerts * 3, (i) => verts[i] * 0.01),
       indices:  List<int>.generate(_nFaces * 3, (i) => _faces[i]),
       camT:     camT,
     );
