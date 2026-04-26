@@ -309,14 +309,14 @@ class _MeshPainterProjected extends CustomPainter {
       final Y = frame.vertices[i * 3 + 1];
       final Z = frame.vertices[i * 3 + 2];
 
-      // Correct perspective projection matching the Python renderer.py:
-      //   vertices are in SMPL FK space (Y-up, Z-backward).
-      //   renderer.py applies R_x(180°) to the mesh (Y_smpl = -Y_mhr, Z_smpl = -Z_mhr),
-      //   places the camera at (-tx, ty, tz) and looks along -Z.
-      //   depth = tz - Z_smpl  (= tz + Z_mhr, positive for visible vertices)
-      //   projX = fx*(X + tx) / depth + cx
-      //   projY = cy - fy*(Y - ty) / depth   (screen Y-down, NDC Y-up)
-      final dz = tz - Z; // depth: tz - Z_smpl
+      // Perspective projection matching renderer.py exactly:
+      //   renderer.py applies R_x(180°) to the MHR mesh: Y→ -Y, Z→ -Z
+      //   then flips cam_t[0]: camera placed at (-tx, ty, tz), looking along -Z.
+      //   In camera space: V_cam = (X+tx, -Y-ty, -Z-tz)
+      //   depth = -V_cam.z = Z + tz   (positive for visible MHR vertices)
+      //   x_pixel = fx * (X + tx) / depth + cx
+      //   y_pixel = cy + fy * (Y + ty) / depth   (screen Y-down, MHR Y-up)
+      final dz = Z + tz; // depth in MHR space (Z-forward)
       if (dz.abs() < 1e-6) {
         projX[i] = cx;
         projY[i] = cy;
@@ -324,7 +324,7 @@ class _MeshPainterProjected extends CustomPainter {
         continue;
       }
       projX[i] = (fx * (X + tx) / dz + cx).toDouble();
-      projY[i] = (cy - fy * (Y - ty) / dz).toDouble();
+      projY[i] = (cy + fy * (Y + ty) / dz).toDouble();
       projZ[i] = dz;
     }
 

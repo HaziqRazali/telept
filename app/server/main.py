@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -35,6 +36,12 @@ logger = logging.getLogger("sam3d_server")
 # ---------------------------------------------------------------------------
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
+
+# Single-threaded executor: all torch.compile / CUDA-graph inference must run
+# on the same OS thread.  CUDA graph tree-manager state is stored in
+# thread-local storage and raises AssertionError when called from a different
+# thread (which happens with plain threading.Thread per job).
+_inference_pool = ThreadPoolExecutor(max_workers=1)
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +160,7 @@ async def process_video(video: UploadFile = File(...)):
                 _jobs[job_id]["error"] = str(exc)
             shutil.rmtree(work_dir, ignore_errors=True)
 
-    threading.Thread(target=_run, daemon=True).start()
+    _inference_pool.submit(_run)
 
     return JSONResponse({"job_id": job_id})
 
@@ -265,7 +272,7 @@ async def process_video_params(video: UploadFile = File(...)):
                 _jobs[job_id]["error"] = str(exc)
             shutil.rmtree(work_dir, ignore_errors=True)
 
-    threading.Thread(target=_run, daemon=True).start()
+    _inference_pool.submit(_run)
     return JSONResponse({"job_id": job_id})
 
 
