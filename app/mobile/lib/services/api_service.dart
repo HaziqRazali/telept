@@ -7,7 +7,7 @@ import 'package:dio/dio.dart';
 import '../config.dart';
 import '../models/mesh_frame.dart';
 import '../models/mesh_meta.dart';
-import '../models/smpl_params_result.dart';
+import '../models/mhr_params_result.dart';
 import 'obj_parser.dart';
 
 /// Result of processing a video on the server (OBJ path).
@@ -47,10 +47,10 @@ class ApiService {
   // Option B: compact SMPL binary  (fast path)
   // ---------------------------------------------------------------------------
 
-  /// Upload [videoPath], get SMPL params binary back, run FK on device.
+  /// Upload [videoPath], get MHR params binary back, run FK on device.
   ///
   /// [onProgress] 0.0–0.5 upload, 0.5–0.99 server inference, 1.0 done.
-  Future<SmplParamsResult> processVideoParams(
+  Future<MhrParamsResult> processVideoParams(
     String videoPath, {
     void Function(double progress)? onProgress,
   }) async {
@@ -118,7 +118,7 @@ class ApiService {
 
     final binBytes = Uint8List.fromList(resultResponse.data as List<int>);
     onProgress?.call(1.0);
-    return SmplParamsResult.fromBinary(binBytes);
+    return MhrParamsResult.fromBinary(binBytes);
   }
 
   // ---------------------------------------------------------------------------
@@ -164,11 +164,11 @@ class ApiService {
     return json.decode(response.data as String) as Map<String, dynamic>;
   }
 
-  /// Fetch SMPL params starting from [fromFrame] (frames ready so far).
+  /// Fetch MHR params starting from [fromFrame] (frames ready so far).
   ///
-  /// Returns a [SmplParamsResult] with however many frames are available.
+  /// Returns a [MhrParamsResult] with however many frames are available.
   /// Safe to call while the job is still processing.
-  Future<SmplParamsResult> fetchPartialParams(String jobId, int fromFrame) async {
+  Future<MhrParamsResult> fetchPartialParams(String jobId, int fromFrame) async {
     final response = await _dio.get(
       AppConfig.resultParamsPartialEndpoint(jobId, fromFrame),
       options: Options(responseType: ResponseType.bytes),
@@ -180,7 +180,7 @@ class ApiService {
       );
     }
     final bytes = Uint8List.fromList(response.data as List<int>);
-    return SmplParamsResult.fromBinary(bytes);
+    return MhrParamsResult.fromBinary(bytes);
   }
 
   // ---------------------------------------------------------------------------

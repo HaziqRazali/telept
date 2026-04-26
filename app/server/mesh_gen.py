@@ -364,43 +364,33 @@ def generate_sam3d_meshes(
 
 
 # ---------------------------------------------------------------------------
-# MHR → SMPL params (Option B – compact binary output)
+# MHR params (compact binary output)
 # ---------------------------------------------------------------------------
 
-_MHR2SMPL_MODEL_PATH = os.path.expanduser(
-    "~/Fast-SAM-3D-Body/mhr2smpl/experiments/multiview_n30000_e500/best_model.pth"
-)
-_MHR2SMPL_SMPL_PATH = os.path.expanduser(
-    "~/Fast-SAM-3D-Body/mhr2smpl/data/SMPL_NEUTRAL.pkl"
-)
-_mhr2smpl: "MHR2SMPLMultiView | None" = None
 
-
-def _get_mhr2smpl():
-    global _mhr2smpl
-    if _mhr2smpl is not None:
-        return _mhr2smpl
-    sys.path.insert(0, os.path.expanduser("~/Fast-SAM-3D-Body"))
-    from mhr2smpl.multi_view.infer_multiview import MHR2SMPLMultiView  # type: ignore
-    _mhr2smpl = MHR2SMPLMultiView(model_path=_MHR2SMPL_MODEL_PATH)
-    print("[mesh_gen] MHR2SMPLMultiView loaded")
-    return _mhr2smpl
-
-
-def _fk_and_mhr2smpl_single(
+def _fk_and_get_mhr_params_single(
     estimator,
-    mhr2smpl,
     output: dict,
     mean_shape: np.ndarray,
 ) -> Tuple[np.ndarray, int]:
     """
-    Run forward kinematics + MHR→SMPL conversion for a single frame.
+    Run MHR forward kinematics for a single frame and return the raw
+    model_parameters[204] + cam_t[3] needed by the app's Dart FK engine.
 
-    Returns (params_row_f32[79], valid_u8).
-    Params layout: go(3) + body_pose(63) + betas(10) + cam_t(3).
+    Returns (params_row_f32[207], valid_u8).
+    Params layout: model_params(204) + cam_t(3).
+
+    model_params[204] layout (set by _mhr_forward_core):
+        [0:3]    global_trans * 10  (always zero; root translation is in cam_t)
+        [3:6]    global_rot euler ZYX
+        [6:136]  body_pose euler (130 joints)
+        [136:204] scales (68 per-joint scale values, expanded from 28 PCA comps)
     """
-    PARAMS_PER_FRAME = 79
+    PARAMS_PER_FRAME = 207
     params_row = np.zeros(PARAMS_PER_FRAME, dtype=np.float32)
+
+    if output.get("pred_cam_t") is None:
+        return params_row, 0
 
     head   = estimator.model.head_pose
     device = estimator.device
@@ -416,21 +406,14 @@ def _fk_and_mhr2smpl_single(
         hand_poses = torch.from_numpy(output["hand_pose_params"][None]).float().to(device)
 
     with torch.no_grad():
-        verts_batch, _, _, _, _ = head._mhr_forward_core(
+        _, _, _, mhr_model_params, _ = head._mhr_forward_core(
             global_trans, global_rots, body_poses, hand_poses,
             scales, mean_shape_t, exprs,
             return_keypoints=False,
         )
-        verts_np = verts_batch[0].cpu().numpy()  # (V, 3)  -- no flip, raw camera space
 
-    if output.get("pred_cam_t") is None:
-        return params_row, 0
-
-    go, body_pose, betas, _ = mhr2smpl.infer([(verts_np, output["pred_cam_t"])])
-    params_row[:3]    = go.astype(np.float32)
-    params_row[3:66]  = body_pose.astype(np.float32)
-    params_row[66:76] = betas.astype(np.float32)
-    params_row[76:79] = np.asarray(output["pred_cam_t"], dtype=np.float32).ravel()[:3]
+    params_row[:204] = mhr_model_params[0].cpu().numpy().astype(np.float32)
+    params_row[204:207] = np.asarray(output["pred_cam_t"], dtype=np.float32).ravel()[:3]
     return params_row, 1
 
 
@@ -441,19 +424,20 @@ def generate_sam3d_params(
     frame_ready_callback: Optional[Callable[[int, np.ndarray, int, float], None]] = None,
 ) -> Tuple[str, int, float]:
     """
-    Run SAM3DBody on every frame, convert MHR vertices → SMPL params via
-    MHR2SMPLMultiView, and write a compact binary result.
+    Run SAM3DBody on every frame, extract raw MHR model_parameters[204],
+    and write a compact binary result for the app's Dart FK engine.
 
     As soon as mean_shape is established (after the first 10 valid frames),
-    FK + MHR2SMPL results are emitted immediately per frame via
-    frame_ready_callback(frame_idx, params_row[76], valid_u8, fps).
+    FK results are emitted immediately per frame via
+    frame_ready_callback(frame_idx, params_row[207], valid_u8, fps).
     This allows callers to stream partial results without waiting for the
     full video to finish processing.
 
     Binary format (result.bin):
-        Header  – 3 × int32  : [magic=0x534D504C, frame_count, param_count_per_frame=76]
-        Frames  – frame_count × 76 × float32:
-                    [go(3), body_pose(63), betas(10)]
+        Header  – 3 × int32  : [magic=0x4D485250, frame_count, param_count_per_frame=207]
+        Header  – 2 × float32: [fps, focal_length]
+        Frames  – frame_count × 207 × float32:
+                    [model_params(204), cam_t(3)]
         Validity – frame_count × uint8 : 1 if valid, 0 if detection failed
 
     Returns (bin_path, frame_count, fps).
@@ -461,7 +445,6 @@ def generate_sam3d_params(
     import struct
 
     estimator = _get_estimator()
-    mhr2smpl  = _get_mhr2smpl()
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -490,7 +473,7 @@ def generate_sam3d_params(
     valid_shape_count = 0
 
     # Final params arrays (filled either eagerly or in the post-loop pass).
-    PARAMS_PER_FRAME = 79  # go(3) + body_pose(63) + betas(10) + cam_t(3)
+    PARAMS_PER_FRAME = 207  # model_params(204) + cam_t(3)
     params_list: List[np.ndarray] = []  # one (76,) row per frame, in order
     valid_list:  List[int]        = []
 
@@ -550,7 +533,7 @@ def generate_sam3d_params(
             # Retroactively process all buffered frames.
             for buf_idx, buf_out in enumerate(frame_outputs):
                 if buf_out is not None and buf_out.get("shape_params") is not None:
-                    row, v = _fk_and_mhr2smpl_single(estimator, mhr2smpl, buf_out, mean_shape)
+                    row, v = _fk_and_get_mhr_params_single(estimator, buf_out, mean_shape)
                 else:
                     row, v = np.zeros(PARAMS_PER_FRAME, dtype=np.float32), 0
                 params_list.append(row)
@@ -559,7 +542,7 @@ def generate_sam3d_params(
                     frame_ready_callback(buf_idx, row, v, fps, focal_length)
             # Process this frame immediately.
             if best_output is not None and best_output.get("shape_params") is not None:
-                row, v = _fk_and_mhr2smpl_single(estimator, mhr2smpl, best_output, mean_shape)
+                row, v = _fk_and_get_mhr_params_single(estimator, best_output, mean_shape)
             else:
                 row, v = np.zeros(PARAMS_PER_FRAME, dtype=np.float32), 0
             params_list.append(row)
@@ -585,7 +568,7 @@ def generate_sam3d_params(
 
         for buf_idx, buf_out in enumerate(frame_outputs):
             if mean_shape is not None and buf_out is not None and buf_out.get("shape_params") is not None:
-                row, v = _fk_and_mhr2smpl_single(estimator, mhr2smpl, buf_out, mean_shape)
+                row, v = _fk_and_get_mhr_params_single(estimator, buf_out, mean_shape)
             else:
                 row, v = np.zeros(PARAMS_PER_FRAME, dtype=np.float32), 0
             params_list.append(row)
@@ -598,7 +581,7 @@ def generate_sam3d_params(
     print(f"[mesh_gen] Valid frames: {int(valid_array.sum())}/{actual_frames}")
 
     # --- Write compact binary --------------------------------------------
-    MAGIC = 0x534D504C  # 'SMPL'
+    MAGIC = 0x4D485250  # 'MHRP'
     bin_path = os.path.join(work_dir, "result.bin")
     with open(bin_path, "wb") as f:
         f.write(struct.pack("<I", MAGIC))

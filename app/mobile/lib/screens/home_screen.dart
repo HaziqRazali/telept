@@ -1,13 +1,15 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../config.dart';
 import '../models/mesh_frame.dart';
 import '../models/sensor_sample.dart';
-import '../models/smpl_params_result.dart';
+import '../models/mhr_params_result.dart';
 import '../services/api_service.dart';
 import '../services/ble_service.dart';
-import '../services/smpl_model.dart';
+import '../services/mhr_model.dart';
 import 'record_screen.dart';
 import 'viewer_screen.dart';
 
@@ -120,8 +122,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // 5. Run FK on device for the initial batch
       setState(() => _statusText = 'Computing 3D frames...');
-      final smpl = SmplModel.instance;
-      final initialFrames = await _runFk(smpl, initialParams);
+      final mhr = MhrModel.instance;
+      await mhr.load();
+      final initialFrames = await _runFk(mhr, initialParams);
       if (!mounted) return;
 
       final fps = initialParams.fps > 0 ? initialParams.fps : 30.0;
@@ -151,7 +154,7 @@ class _HomeScreenState extends State<HomeScreen> {
         jobId: jobId,
         notifier: framesNotifier,
         totalFramesNotifier: totalFramesNotifier,
-        smpl: smpl,
+        mhr: mhr,
         nextFrame: initialParams.frameCount,
       );
     } on ApiException catch (e) {
@@ -169,22 +172,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Run SMPL forward kinematics on [params] and return the resulting frames.
-  Future<List<MeshFrame>> _runFk(SmplModel smpl, SmplParamsResult params) async {
+  /// Run MHR forward kinematics on [params] and return the resulting frames.
+  Future<List<MeshFrame>> _runFk(MhrModel mhr, MhrParamsResult params) async {
     final frames = <MeshFrame>[];
     for (int i = 0; i < params.frameCount; i++) {
       if (params.isValid(i)) {
-        frames.add(smpl.forward(
-          go: params.go(i),
-          bodyPose: params.bodyPose(i),
-          betas: params.betas(i),
+        frames.add(mhr.forward(
+          modelParams: params.modelParams(i),
           camT: params.camT(i),
         ));
       } else {
-        frames.add(smpl.forward(
-          go: List.filled(3, 0.0),
-          bodyPose: List.filled(63, 0.0),
-          betas: List.filled(10, 0.0),
+        frames.add(mhr.forward(
+          modelParams: Float32List(204),
         ));
       }
       if (i % 10 == 0) await Future.microtask(() {});
@@ -197,7 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
     required String jobId,
     required ValueNotifier<List<MeshFrame>> notifier,
     required ValueNotifier<int> totalFramesNotifier,
-    required SmplModel smpl,
+    required MhrModel mhr,
     required int nextFrame,
   }) async {
     try {
@@ -219,7 +218,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (framesDone > nextFrame) {
           final partial = await _api.fetchPartialParams(jobId, nextFrame);
           if (partial.frameCount > 0) {
-            final newFrames = await _runFk(smpl, partial);
+            final newFrames = await _runFk(mhr, partial);
             notifier.value = List.unmodifiable([...notifier.value, ...newFrames]);
             nextFrame += partial.frameCount;
           }

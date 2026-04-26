@@ -244,7 +244,7 @@ async def process_video_params(video: UploadFile = File(...)):
                 fps = cap.get(_cv2.CAP_PROP_FPS) or 30.0
                 n_frames = max(1, int(cap.get(_cv2.CAP_PROP_FRAME_COUNT)))
                 cap.release()
-                PARAMS_PER_FRAME = 79
+                PARAMS_PER_FRAME = 207
                 zero_row = _np.zeros(PARAMS_PER_FRAME, dtype=_np.float32)
                 for i in range(n_frames):
                     _frame_ready(i, zero_row, 1, fps, focal_length=0.0)
@@ -336,7 +336,7 @@ async def get_result_params(job_id: str):
     return Response(
         content=bytes(body),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": "attachment; filename=smpl_params.bin"},
+                headers={"Content-Disposition": "attachment; filename=mhr_params.bin"},
         background=_cleanup_task(work_dir, job_id),
     )
 
@@ -371,9 +371,9 @@ async def get_result_params_partial(job_id: str, from_frame: int = 0):
 # ---------------------------------------------------------------------------
 import struct as _struct
 
-_PARAMS_PER_FRAME = 79
+_PARAMS_PER_FRAME = 207
 _PARAMS_BYTES     = _PARAMS_PER_FRAME * 4  # float32
-_MAGIC            = 0x534D504C  # 'SMPL'
+_MAGIC            = 0x4D485250  # 'MHRP'
 
 
 def _build_params_binary(job: dict, from_frame: int) -> bytearray:

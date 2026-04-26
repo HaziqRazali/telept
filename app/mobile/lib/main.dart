@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'config.dart';
 import 'screens/home_screen.dart';
-import 'services/smpl_model.dart';
+import 'services/mhr_model.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppConfig.init(); // load persisted server URL before first build
-  await SmplModel.instance.load(); // pre-load 1 MB SMPL asset
+  await MhrModel.instance.load(); // pre-load MHR body model assets
   runApp(const TelePTApp());
 }
 
