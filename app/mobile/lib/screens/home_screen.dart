@@ -3,9 +3,12 @@ import 'package:image_picker/image_picker.dart';
 
 import '../config.dart';
 import '../models/mesh_frame.dart';
+import '../models/sensor_sample.dart';
 import '../models/smpl_params_result.dart';
 import '../services/api_service.dart';
+import '../services/ble_service.dart';
 import '../services/smpl_model.dart';
+import 'record_screen.dart';
 import 'viewer_screen.dart';
 
 /// Home screen with a "Record Video" button and server upload flow.
@@ -25,18 +28,22 @@ class _HomeScreenState extends State<HomeScreen> {
   double _uploadProgress = 0;
   double _serverProgress = 0; // 0.0–1.0, frames_done/total_frames
 
+  @override
+  void initState() {
+    super.initState();
+    // Start BLE scanning so the sensor is ready before the user presses Record.
+    bleService.start(context);
+  }
+
   Future<void> _recordAndProcess() async {
-    final XFile? video = await _picker.pickVideo(
-      source: ImageSource.camera,
-      maxDuration: AppConfig.maxVideoDurationSec > 0
-          ? Duration(seconds: AppConfig.maxVideoDurationSec)
-          : null,
+    final result = await Navigator.of(context).push<RecordResult>(
+      MaterialPageRoute(builder: (_) => const RecordScreen()),
     );
-    if (video == null) {
+    if (result == null) {
       _showSnack('Recording cancelled');
       return;
     }
-    await _processVideo(video.path);
+    await _processVideo(result.videoPath, sensorTimeline: result.sensorTimeline);
   }
 
   Future<void> _pickVideoFromGallery() async {
@@ -48,11 +55,13 @@ class _HomeScreenState extends State<HomeScreen> {
     await _processVideo(video.path);
   }
 
+
   // ---------------------------------------------------------------------------
   // Core streaming processing flow
   // ---------------------------------------------------------------------------
 
-  Future<void> _processVideo(String videoPath) async {
+  Future<void> _processVideo(String videoPath,
+      {List<SensorSample>? sensorTimeline}) async {
     setState(() {
       _isProcessing = true;
       _statusText = 'Checking server...';
@@ -132,6 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
             videoPath: videoPath,
             totalFramesNotifier: totalFramesNotifier,
             focalLength: initialParams.focalLength,
+            sensorTimeline: sensorTimeline,
           ),
         ),
       );
@@ -332,6 +342,23 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('TelePT Body Capture'),
         centerTitle: true,
         actions: [
+          // BLE connection status indicator
+          ValueListenableBuilder<bool>(
+            valueListenable: bleService.isConnected,
+            builder: (_, connected, __) {
+              return Tooltip(
+                message: connected ? 'Sensor connected' : 'Sensor not connected',
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Icon(
+                    Icons.bluetooth,
+                    color: connected ? Colors.greenAccent : Colors.grey,
+                    size: 22,
+                  ),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Server settings',

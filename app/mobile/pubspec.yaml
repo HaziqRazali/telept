@@ -35,6 +35,12 @@ dependencies:
   # UI
   permission_handler: ^11.3.1
 
+  # BLE (load cell sensor)
+  bluetooth_low_energy: ^6.1.0
+
+  # Charts (sensor timeline)
+  syncfusion_flutter_charts: ^28.1.38
+
   # LLM (Gemini)
   google_generative_ai: ^0.4.3
 

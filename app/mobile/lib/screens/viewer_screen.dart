@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/mesh_frame.dart';
+import '../models/sensor_sample.dart';
 import '../services/api_service.dart';
 import '../widgets/mesh_viewer.dart';
 import '../widgets/chat_panel.dart';
@@ -27,6 +29,7 @@ class ViewerScreen extends StatefulWidget {
     super.key,
     required ProcessingResult this.result,
     required this.videoPath,
+    this.sensorTimeline,
   })  : framesNotifier = null,
         streamingFps = null,
         totalFramesNotifier = null,
@@ -40,6 +43,10 @@ class ViewerScreen extends StatefulWidget {
   /// in overlay mode).  0 when unknown (uses a FOV-based fallback).
   final double focalLength;
 
+  /// Optional sensor timeline recorded during video capture.
+  /// When non-null, a sensor chart panel is available in the viewer.
+  final List<SensorSample>? sensorTimeline;
+
   /// Streaming constructor: frames arrive incrementally via [framesNotifier].
   const ViewerScreen.streaming({
     super.key,
@@ -48,6 +55,7 @@ class ViewerScreen extends StatefulWidget {
     required this.videoPath,
     this.totalFramesNotifier,
     this.focalLength = 0.0,
+    this.sensorTimeline,
   }) : result = null;
 
   @override
@@ -60,10 +68,14 @@ class _ViewerScreenState extends State<ViewerScreen>
   bool _showVideo = true;
   bool _showMesh = true;
   bool _showChat = false;
+  bool _showSensor = false;
   bool _overlayMesh = false;
 
+  bool get _hasSensor => (widget.sensorTimeline?.isNotEmpty ?? false);
+
   int get _visibleCount =>
-      (_showVideo ? 1 : 0) + (_showMesh ? 1 : 0) + (_showChat ? 1 : 0);
+      (_showVideo ? 1 : 0) + (_showMesh ? 1 : 0) + (_showChat ? 1 : 0) +
+      (_showSensor ? 1 : 0);
 
   void _toggle(String panel) {
     setState(() {
@@ -80,6 +92,7 @@ class _ViewerScreenState extends State<ViewerScreen>
         'video' => _showVideo,
         'mesh' => _showMesh,
         'chat' => _showChat,
+        'sensor' => _showSensor,
         _ => false,
       };
       // Don't allow hiding the last visible panel
@@ -93,6 +106,8 @@ class _ViewerScreenState extends State<ViewerScreen>
           if (!_showMesh) _overlayMesh = false;
         case 'chat':
           _showChat = !_showChat;
+        case 'sensor':
+          _showSensor = !_showSensor;
       }
     });
   }
@@ -272,8 +287,8 @@ class _ViewerScreenState extends State<ViewerScreen>
                   _SideRail(
                     showVideo: _showVideo,
                     showMesh: _showMesh,
-                    showChat: _showChat,
-                    overlayMesh: _overlayMesh,
+                    showChat: _showChat,                    showSensor: _showSensor,
+                    hasSensor: _hasSensor,                    overlayMesh: _overlayMesh,
                     onToggle: _toggle,
                   ),
 
@@ -359,12 +374,23 @@ class _ViewerScreenState extends State<ViewerScreen>
                                           color: Colors.white54),
                                     ),
                             ),
-                            if (_showChat)
+                            if (_showChat || _showSensor)
                               Container(width: 1, color: Colors.white12),
                           ],
                         ],
                         if (_showChat)
                           const Expanded(child: ChatPanel()),
+                        if (_showSensor && _hasSensor) ...[
+                          if (_showChat)
+                            Container(width: 1, color: Colors.white12),
+                          Expanded(
+                            child: _SensorPanel(
+                              timeline: widget.sensorTimeline!,
+                              currentFrame: _currentFrame,
+                              fps: _fps,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -414,6 +440,8 @@ class _SideRail extends StatelessWidget {
   final bool showVideo;
   final bool showMesh;
   final bool showChat;
+  final bool showSensor;
+  final bool hasSensor;
   final bool overlayMesh;
   final void Function(String) onToggle;
 
@@ -421,6 +449,8 @@ class _SideRail extends StatelessWidget {
     required this.showVideo,
     required this.showMesh,
     required this.showChat,
+    required this.showSensor,
+    required this.hasSensor,
     required this.overlayMesh,
     required this.onToggle,
   });
@@ -464,6 +494,16 @@ class _SideRail extends StatelessWidget {
             activeColor: Colors.purple[300]!,
             onTap: () => onToggle('chat'),
           ),
+          if (hasSensor) ...[
+            const SizedBox(height: 8),
+            _RailButton(
+              icon: Icons.show_chart,
+              label: 'Sensor',
+              active: showSensor,
+              activeColor: Colors.tealAccent,
+              onTap: () => onToggle('sensor'),
+            ),
+          ],
         ],
       ),
     );
@@ -507,6 +547,124 @@ class _RailButton extends StatelessWidget {
             color: active ? activeColor : Colors.white30,
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sensor chart panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SensorPanel extends StatelessWidget {
+  final List<SensorSample> timeline;
+  final int currentFrame;
+  final double fps;
+
+  const _SensorPanel({
+    required this.timeline,
+    required this.currentFrame,
+    required this.fps,
+  });
+
+  double get _cursorSec => fps > 0 ? currentFrame / fps : 0.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.grey[900],
+      padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 4, bottom: 6),
+            child: Text(
+              'Sensor Data',
+              style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            child: SfCartesianChart(
+              backgroundColor: Colors.transparent,
+              plotAreaBorderWidth: 0,
+              legend: const Legend(
+                isVisible: true,
+                textStyle: TextStyle(color: Colors.white54, fontSize: 10),
+              ),
+              primaryXAxis: const NumericAxis(
+                title: AxisTitle(
+                    text: 'Time (s)',
+                    textStyle: TextStyle(color: Colors.white54, fontSize: 10)),
+                labelStyle: TextStyle(color: Colors.white54, fontSize: 10),
+                majorGridLines: MajorGridLines(width: 0.3, color: Colors.white12),
+                axisLine: AxisLine(color: Colors.white24),
+              ),
+              primaryYAxis: const NumericAxis(
+                name: 'Force',
+                title: AxisTitle(
+                    text: 'Force (kg)',
+                    textStyle: TextStyle(color: Colors.tealAccent, fontSize: 10)),
+                labelStyle:
+                    TextStyle(color: Colors.tealAccent, fontSize: 10),
+                majorGridLines:
+                    MajorGridLines(width: 0.3, color: Colors.white12),
+                axisLine: AxisLine(color: Colors.white24),
+              ),
+              axes: const [
+                NumericAxis(
+                  name: 'Direction',
+                  opposedPosition: true,
+                  title: AxisTitle(
+                      text: 'Direction (°)',
+                      textStyle:
+                          TextStyle(color: Colors.orangeAccent, fontSize: 10)),
+                  labelStyle:
+                      TextStyle(color: Colors.orangeAccent, fontSize: 10),
+                  majorGridLines: MajorGridLines(width: 0),
+                  axisLine: AxisLine(color: Colors.white24),
+                ),
+              ],
+              annotations: [
+                CartesianChartAnnotation(
+                  widget: const SizedBox(
+                    width: 1.5,
+                    child: ColoredBox(color: Colors.white70),
+                  ),
+                  coordinateUnit: CoordinateUnit.point,
+                  x: _cursorSec,
+                  y: 0,
+                  verticalAlignment: ChartAlignment.near,
+                ),
+              ],
+              series: [
+                LineSeries<SensorSample, double>(
+                  name: 'Force',
+                  yAxisName: 'Force',
+                  dataSource: timeline,
+                  xValueMapper: (s, _) => s.timestampMs / 1000.0,
+                  yValueMapper: (s, _) => s.force,
+                  color: Colors.tealAccent,
+                  width: 1.5,
+                  markerSettings: const MarkerSettings(isVisible: false),
+                ),
+                LineSeries<SensorSample, double>(
+                  name: 'Direction',
+                  yAxisName: 'Direction',
+                  dataSource: timeline,
+                  xValueMapper: (s, _) => s.timestampMs / 1000.0,
+                  yValueMapper: (s, _) => s.direction,
+                  color: Colors.orangeAccent,
+                  width: 1.5,
+                  markerSettings: const MarkerSettings(isVisible: false),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
