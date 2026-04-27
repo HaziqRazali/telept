@@ -1,0 +1,8 @@
+{
+  "n_verts": 4899,
+  "n_params": 204,
+  "source_video": "/home/haziq/telept/telept/pushup_trimmed.mp4",
+  "source_frame": 20,
+  "threshold_cm": 0.05,
+  "description": "model_params.bin: float32[204] input to Dart FK. expected_verts.bin: float32[n_verts*3] ground-truth pymomentum output in cm (Y-UP, before the [1,2]*=-1 flip in sam3d_body.py)."
+}

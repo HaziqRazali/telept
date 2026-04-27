@@ -540,7 +540,11 @@ def generate_sam3d_params(
                 valid_list.append(v)
                 if frame_ready_callback:
                     frame_ready_callback(buf_idx, row, v, fps, focal_length)
-            # Process this frame immediately.
+            # Note: frame_outputs already includes the current frame (appended
+            # above), so the retroactive loop above has already processed it.
+            # No need to process it again here.
+        elif mean_shape is not None:
+            # mean_shape is already established — process this frame immediately.
             if best_output is not None and best_output.get("shape_params") is not None:
                 row, v = _fk_and_get_mhr_params_single(estimator, best_output, mean_shape)
             else:
@@ -549,6 +553,8 @@ def generate_sam3d_params(
             valid_list.append(v)
             if frame_ready_callback:
                 frame_ready_callback(idx, row, v, fps, focal_length)
+
+        idx += 1
         if progress_callback:
             progress_callback(idx, n_frames)
 

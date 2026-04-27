@@ -206,7 +206,8 @@ class MhrModel {
 
     // Step 2: FK tree traversal → global transforms [127, 8]
     // Each entry: [tx, ty, tz, qx, qy, qz, qw, scale]
-    final skelState = _fk(jp);                 // [127 * 8]
+    // Float64List to avoid ~1 cm accumulation error through deep joint chains.
+    final skelState = _fk(jp);                 // [127 * 8] float64
 
     // Step 3: build skinning matrices M[j] = G[j] @ ibp[j]
     final skinMats = _buildSkinMats(skelState);  // [127 * 16]
@@ -249,13 +250,16 @@ class MhrModel {
 
   /// Each joint has 7 params: [tx, ty, tz, rx, ry, rz, scale].
   /// euler convention: ZYX (matches pymomentum / verified numerically).
-  Float32List _fk(Float32List jp) {
-    // Output: global transform per joint [tx, ty, tz, qx, qy, qz, qw, scale]
-    final out = Float32List(_nJointsConst * 8);
+  Float64List _fk(Float32List jp) {
+    // Returns Float64List: global transform per joint [tx, ty, tz, qx, qy, qz, qw, scale].
+    // Float64List avoids ~1 cm accumulation error through deep joint chains
+    // (95+ joints deep can accumulate significant error with float32).
+    final out = Float64List(_nJointsConst * 8);
 
     // Temporaries for parent transforms
-    final gT = Float32List(_nJointsConst * 3);  // global translation
-    final gQ = Float32List(_nJointsConst * 4);  // global rotation quaternion xyzw
+    final gT = Float64List(_nJointsConst * 3);  // global translation
+    final gQ = Float64List(_nJointsConst * 4);  // global rotation quaternion xyzw
+    final gS = Float64List(_nJointsConst);       // accumulated global scale
 
     for (int j = 0; j < _nJointsConst; j++) {
       final jpBase = j * 7;
@@ -265,7 +269,7 @@ class MhrModel {
       final rx      = jp[jpBase + 3];
       final ry      = jp[jpBase + 4];
       final rz      = jp[jpBase + 5];
-      final scale   = 1.0 + jp[jpBase + 6]; // scale offset from 1
+      final scale   = math.exp(0.6931471824645996 * jp[jpBase + 6]); // 2^jp[6]
 
       // Local euler ZYX → quaternion
       final localQ = _eulerZyxToQuat(rx, ry, rz);
@@ -297,21 +301,25 @@ class MhrModel {
         // Root: global = local
         gx = lx; gy = ly; gz = lz;
         gqx = cq[0]; gqy = cq[1]; gqz = cq[2]; gqw = cq[3];
+        gS[j] = scale;
       } else {
-        // Rotate local position by parent's global rotation, then add parent translation
+        // Rotate local position by parent's global rotation, scale by parent global scale,
+        // then add parent global translation
         final pqx = gQ[parent * 4];
         final pqy = gQ[parent * 4 + 1];
         final pqz = gQ[parent * 4 + 2];
         final pqw = gQ[parent * 4 + 3];
 
         final rotated = _quatRotVec(pqx, pqy, pqz, pqw, lx, ly, lz);
-        gx = gT[parent * 3]     + rotated[0];
-        gy = gT[parent * 3 + 1] + rotated[1];
-        gz = gT[parent * 3 + 2] + rotated[2];
+        final ps = gS[parent];
+        gx = gT[parent * 3]     + ps * rotated[0];
+        gy = gT[parent * 3 + 1] + ps * rotated[1];
+        gz = gT[parent * 3 + 2] + ps * rotated[2];
 
         // Global rotation = parent_global * combined
         final gq = _quatMul(pqx, pqy, pqz, pqw, cq[0], cq[1], cq[2], cq[3]);
         gqx = gq[0]; gqy = gq[1]; gqz = gq[2]; gqw = gq[3];
+        gS[j] = ps * scale; // accumulate global scale
       }
 
       gT[j * 3]     = gx;
@@ -330,7 +338,7 @@ class MhrModel {
       out[outBase + 4] = gqy;
       out[outBase + 5] = gqz;
       out[outBase + 6] = gqw;
-      out[outBase + 7] = scale;
+      out[outBase + 7] = gS[j]; // global accumulated scale
     }
     return out;
   }
@@ -339,7 +347,7 @@ class MhrModel {
   // Step 3: Skinning matrices  M[j] = G_mat[j] @ ibp[j]
   // ---------------------------------------------------------------------------
 
-  Float32List _buildSkinMats(Float32List skelState) {
+  Float32List _buildSkinMats(Float64List skelState) {
     final mats = Float32List(_nJointsConst * 16);
 
     for (int j = 0; j < _nJointsConst; j++) {
