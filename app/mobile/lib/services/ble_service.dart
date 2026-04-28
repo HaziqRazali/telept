@@ -68,6 +68,10 @@ final bleService = BleService._();
 class BleService {
   BleService._();
 
+  // Camera start/record can briefly delay BLE notifications on iOS.
+  // Keep this generous so we don't force-disconnect a healthy link.
+  static const int _idleDisconnectMs = 20000;
+
   final CentralManager _manager = CentralManager();
 
   final ValueNotifier<bool> isConnected = ValueNotifier(false);
@@ -77,10 +81,13 @@ class BleService {
 
   bool _working = false;
   bool _stopped = false;
-  bool _scanning = false;
 
   final List<DiscoveredEventArgs> _devList = [];
   final Map<BleDataSource, Peripheral> _dsPeripherals = {};
+  final Set<BleDataSource> _activeSources = {};
+  // Persists across disconnects – once we've seen a peripheral once we
+  // can reconnect to it directly without waiting for another advertisement.
+  final Map<BleDataSource, Peripheral> _knownPeripherals = {};
   List<BleDataSource> _rdevs = [];
 
   StreamSubscription<DiscoveredEventArgs>? _scanSub;
@@ -128,13 +135,15 @@ class BleService {
 
   List<BleDataSource> get configuredSources => List.unmodifiable(_rdevs);
 
-  bool isSourceConnected(BleDataSource ds) => _dsPeripherals.containsKey(ds);
+  bool isSourceConnected(BleDataSource ds) => _activeSources.contains(ds);
 
   Future<void> removeSource(BleDataSource ds) async {
     if (_dsPeripherals.containsKey(ds)) {
       try { await _manager.disconnect(_dsPeripherals[ds]!); } catch (_) {}
       _dsPeripherals.remove(ds);
     }
+    _activeSources.remove(ds);
+    _knownPeripherals.remove(ds);
     _rdevs.remove(ds);
     await AppConfig.setBleDevicesJson(BleDataSource.listToJson(_rdevs));
     _updateConnected();
@@ -157,31 +166,24 @@ class BleService {
   // ── Internal ──────────────────────────────────────────────────────────────
 
   Future<void> _discoverDevices() async {
-    if (_scanning) return;
-    _scanning = true;
+    _devList.clear();
+    scanResultsCount.value = 0;
 
-    // Request Bluetooth permission (mirrors icam; required on iOS and Android)
     if (Platform.isAndroid || Platform.isIOS) {
       await Permission.bluetooth.request();
     }
 
-    // Stop any lingering discovery before starting fresh
     try { await _manager.stopDiscovery(); } catch (_) {}
 
-    // Retry startDiscovery up to 10 times with 2-second back-off (mirrors icam)
+    // Retry startDiscovery up to 10 times, stopping once devices are found
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      for (int i = 0; i < 10; i++) {
+      for (int i = 0; i < 10 && _devList.isEmpty; i++) {
         try {
           await _manager.startDiscovery();
-          break;
-        } catch (_) {
-          await Future.delayed(const Duration(seconds: 2));
-        }
+          return; // scan runs continuously until stop() or next _discoverDevices call
+        } catch (_) {}
+        await Future.delayed(const Duration(seconds: 2));
       }
-      // Let scan run for 10 s, then stop and release the guard
-      await Future.delayed(const Duration(seconds: 10));
-      try { await _manager.stopDiscovery(); } catch (_) {}
-      _scanning = false;
     });
   }
 
@@ -256,10 +258,15 @@ class BleService {
     });
 
     _manager.connectionStateChanged.listen((dargs) {
-      for (final ent in Map.from(_dsPeripherals).entries) {
-        if (dargs.peripheral == ent.value) {
-          if (dargs.state == ConnectionState.disconnected) {
-            _dsPeripherals.remove(ent.key);
+      if (dargs.state == ConnectionState.disconnected) {
+        _dropPeripheral(dargs.peripheral);
+        // Immediately re-populate _dsPeripherals from the known map so the
+        // connect block retries GATT on the very next loop tick without
+        // waiting for a new scan advertisement.
+        for (final ds in _rdevs) {
+          if (!_dsPeripherals.containsKey(ds) &&
+              _knownPeripherals.containsKey(ds)) {
+            _dsPeripherals[ds] = _knownPeripherals[ds]!;
           }
         }
       }
@@ -269,20 +276,24 @@ class BleService {
     await _discoverDevices();
 
     while (!_stopped) {
-      // Rescan if we have configured sources that haven't been found yet
-      if (_rdevs.isNotEmpty &&
+      // Rescan only when devList is empty and not all sources are connected
+      if (_devList.isEmpty &&
           !_rdevs.every((ds) => _dsPeripherals.containsKey(ds))) {
         await _discoverDevices();
         await Future.delayed(const Duration(seconds: 2));
+        if (_devList.isEmpty) continue;
       }
 
       final tnow = DateTime.now().millisecondsSinceEpoch;
       for (final dt in Map.from(mapDevTimes).entries) {
-        if (tnow - dt.value.ts > 2000) {
+        // Do not force-disconnect while recording sensor data.
+        if (!_capturing && tnow - dt.value.ts > _idleDisconnectMs) {
+          _dropPeripheral(dt.key);
           try {
             await _manager.disconnect(dt.key);
           } catch (_) {}
           mapDevTimes.remove(dt.key);
+          _updateConnected();
         }
       }
 
@@ -296,41 +307,67 @@ class BleService {
               } catch (_) {}
 
               final services = await _manager.discoverGATT(device);
-              final svcMatches =
-                  services.where((s) => s.uuid.toString() == ent.key.serviceID);
-              if (svcMatches.isEmpty) break;
+              final svcMatches = services
+                  .where((s) => s.uuid.toString() == ent.key.serviceID);
+              if (svcMatches.isEmpty) {
+                _dropPeripheral(device);
+                break;
+              }
 
               final charMatches = svcMatches.first.characteristics
                   .where((c) => c.uuid.toString() == ent.key.charID);
-              if (charMatches.isEmpty) break;
+              if (charMatches.isEmpty) {
+                _dropPeripheral(device);
+                break;
+              }
 
               await _manager.setCharacteristicNotifyState(
                   device, charMatches.first,
                   state: true);
-
-              mapDevTimes[device] = _DeviceStats();
-              _updateConnected();
-              break;
-            } catch (_) {
+            } catch (e) {
+              _dropPeripheral(device);
+              try { await _manager.disconnect(device); } catch (_) {}
               break;
             }
+            _knownPeripherals[ent.key] = device; // remember for instant reconnect
+            _activeSources.add(ent.key);
+            mapDevTimes[device] = _DeviceStats();
+            _updateConnected();
+            break;
           }
         }
       }
 
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(const Duration(seconds: 2));
     }
 
+    await _manager.stopDiscovery();
     await _scanSub?.cancel();
-    await _stateSub?.cancel();
+    for (final p in _dsPeripherals.values) {
+      try { await _manager.disconnect(p); } catch (_) {}
+    }
+    _activeSources.clear();
     _dsPeripherals.clear();
+    _knownPeripherals.clear();
     _devList.clear();
     scanResultsCount.value = 0;
+    await _stateSub?.cancel();
     _updateConnected();
   }
 
   void _updateConnected() {
-    isConnected.value = _dsPeripherals.isNotEmpty;
+    isConnected.value = _activeSources.isNotEmpty;
+  }
+
+  void _dropPeripheral(Peripheral peripheral) {
+    final matches = _dsPeripherals.entries
+        .where((ent) => ent.value == peripheral)
+        .map((ent) => ent.key)
+        .toList();
+    for (final ds in matches) {
+      _dsPeripherals.remove(ds);
+      _activeSources.remove(ds);
+    }
   }
 
   // ── BLE setup dialog (mirrors icam's showBLEDialog) ──────────────────────
@@ -358,7 +395,7 @@ class BleService {
                 itemCount: _rdevs.length,
                 itemBuilder: (_, i) {
                   final ds = _rdevs[i];
-                  final connected = _dsPeripherals.containsKey(ds);
+                  final connected = _activeSources.contains(ds);
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 4),
                     child: ListTile(

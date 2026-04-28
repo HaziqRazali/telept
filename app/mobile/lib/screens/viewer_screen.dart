@@ -73,9 +73,9 @@ class _ViewerScreenState extends State<ViewerScreen>
 
   bool get _hasSensor => (widget.sensorTimeline?.isNotEmpty ?? false);
 
+  // Sensor is now a bottom panel, not a column — only count top-row panels.
   int get _visibleCount =>
-      (_showVideo ? 1 : 0) + (_showMesh ? 1 : 0) + (_showChat ? 1 : 0) +
-      (_showSensor ? 1 : 0);
+      (_showVideo ? 1 : 0) + (_showMesh ? 1 : 0) + (_showChat ? 1 : 0);
 
   void _toggle(String panel) {
     setState(() {
@@ -296,94 +296,102 @@ class _ViewerScreenState extends State<ViewerScreen>
 
                   // ── Panel area ─────────────────────────────────────
                   Expanded(
-                    child: Row(
+                    child: Column(
                       children: [
-                        if (_overlayMesh && _showVideo && _showMesh) ...[
-                          // Overlay mode: mesh drawn semi-transparently over video.
-                          // Both the video and the overlay live inside the same
-                          // AspectRatio so the overlay pixel space matches the
-                          // displayed video pixel space exactly (no letterbox offset).
-                          Expanded(
-                            child: _videoInitialized
-                                ? Center(
-                                    child: AspectRatio(
-                                      aspectRatio:
-                                          _videoController.value.aspectRatio,
-                                      child: Stack(
-                                        fit: StackFit.expand,
-                                        children: [
-                                          VideoPlayer(_videoController),
-                                          if (frame != null)
-                                            LayoutBuilder(
-                                              builder: (ctx, constraints) {
-                                                // Scale focal length from original
-                                                // video pixels → display pixels so
-                                                // the projection stays correct.
-                                                final displayW =
-                                                    constraints.maxWidth;
-                                                final videoW = _videoController
-                                                    .value.size.width;
-                                                final scaledFl = videoW > 0
-                                                    ? widget.focalLength *
-                                                        (displayW / videoW)
-                                                    : widget.focalLength;
-                                                return Opacity(
-                                                  opacity: 0.65,
-                                                  child: MeshViewer(
-                                                    frame: frame,
-                                                    overlay: true,
-                                                    focalLength: scaledFl,
+                        // ── Top row: video / mesh / chat ──────────────
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (_overlayMesh && _showVideo && _showMesh) ...[
+                                // Overlay mode: mesh drawn semi-transparently over video.
+                                // Both the video and the overlay live inside the same
+                                // AspectRatio so the overlay pixel space matches the
+                                // displayed video pixel space exactly (no letterbox offset).
+                                Expanded(
+                                  child: _videoInitialized
+                                      ? Center(
+                                          child: AspectRatio(
+                                            aspectRatio:
+                                                _videoController.value.aspectRatio,
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                VideoPlayer(_videoController),
+                                                if (frame != null)
+                                                  LayoutBuilder(
+                                                    builder: (ctx, constraints) {
+                                                      // Scale focal length from original
+                                                      // video pixels → display pixels so
+                                                      // the projection stays correct.
+                                                      final displayW =
+                                                          constraints.maxWidth;
+                                                      final videoW = _videoController
+                                                          .value.size.width;
+                                                      final scaledFl = videoW > 0
+                                                          ? widget.focalLength *
+                                                              (displayW / videoW)
+                                                          : widget.focalLength;
+                                                      return Opacity(
+                                                        opacity: 0.65,
+                                                        child: MeshViewer(
+                                                          frame: frame,
+                                                          overlay: true,
+                                                          focalLength: scaledFl,
+                                                        ),
+                                                      );
+                                                    },
                                                   ),
-                                                );
-                                              },
+                                              ],
                                             ),
-                                        ],
-                                      ),
-                                    ),
-                                  )
-                                : const Center(
-                                    child: CircularProgressIndicator(
-                                        color: Colors.white54),
+                                          ),
+                                        )
+                                      : const Center(
+                                          child: CircularProgressIndicator(
+                                              color: Colors.white54),
+                                        ),
+                                ),
+                              ] else ...[
+                                if (_showVideo) ...[
+                                  Expanded(
+                                    child: _videoInitialized
+                                        ? Center(
+                                            child: AspectRatio(
+                                              aspectRatio:
+                                                  _videoController.value.aspectRatio,
+                                              child: VideoPlayer(_videoController),
+                                            ),
+                                          )
+                                        : const Center(
+                                            child: CircularProgressIndicator(
+                                                color: Colors.white54),
+                                          ),
                                   ),
+                                  if (_showMesh || _showChat)
+                                    Container(width: 1, color: Colors.white12),
+                                ],
+                                if (_showMesh) ...[
+                                  Expanded(
+                                    child: frame != null
+                                        ? MeshViewer(frame: frame)
+                                        : const Center(
+                                            child: CircularProgressIndicator(
+                                                color: Colors.white54),
+                                          ),
+                                  ),
+                                  if (_showChat)
+                                    Container(width: 1, color: Colors.white12),
+                                ],
+                              ],
+                              if (_showChat)
+                                const Expanded(child: ChatPanel()),
+                            ],
                           ),
-                        ] else ...[
-                          if (_showVideo) ...[
-                            Expanded(
-                              child: _videoInitialized
-                                  ? Center(
-                                      child: AspectRatio(
-                                        aspectRatio:
-                                            _videoController.value.aspectRatio,
-                                        child: VideoPlayer(_videoController),
-                                      ),
-                                    )
-                                  : const Center(
-                                      child: CircularProgressIndicator(
-                                          color: Colors.white54),
-                                    ),
-                            ),
-                            if (_showMesh || _showChat)
-                              Container(width: 1, color: Colors.white12),
-                          ],
-                          if (_showMesh) ...[
-                            Expanded(
-                              child: frame != null
-                                  ? MeshViewer(frame: frame)
-                                  : const Center(
-                                      child: CircularProgressIndicator(
-                                          color: Colors.white54),
-                                    ),
-                            ),
-                            if (_showChat || _showSensor)
-                              Container(width: 1, color: Colors.white12),
-                          ],
-                        ],
-                        if (_showChat)
-                          const Expanded(child: ChatPanel()),
+                        ),
+                        // ── Bottom row: sensor panel (full width) ─────
                         if (_showSensor && _hasSensor) ...[
-                          if (_showChat)
-                            Container(width: 1, color: Colors.white12),
-                          Expanded(
+                          Container(height: 1, color: Colors.white12),
+                          SizedBox(
+                            height: 220,
                             child: _SensorPanel(
                               timeline: widget.sensorTimeline!,
                               currentFrame: _currentFrame,
