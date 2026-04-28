@@ -137,10 +137,12 @@ class _ViewerScreenState extends State<ViewerScreen>
   void initState() {
     super.initState();
 
-    // Start with whatever frames are available; duration will grow as more arrive.
-    final initialFrames = _totalFrames;
-    final initialDurationMs =
-        initialFrames > 0 ? (initialFrames / _fps * 1000).round() : 1000;
+    // Base the initial duration on total expected frames when known so the
+    // controller's timeline matches the full video from the start.
+    final knownTotal = _totalExpectedFrames > 0
+        ? _totalExpectedFrames
+        : (_totalFrames > 0 ? _totalFrames : 1);
+    final initialDurationMs = (knownTotal / _fps * 1000).round();
     _playController = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: initialDurationMs),
@@ -160,10 +162,10 @@ class _ViewerScreenState extends State<ViewerScreen>
   void _onFramesUpdated() {
     if (!mounted) return;
     setState(() {
-      // Extend the controller duration to match the new total so the scrubber
-      // max grows automatically.  Don't interrupt a running animation.
-      if (!_isPlaying) {
-        final newDurationMs = (_totalFrames / _fps * 1000).round();
+      // Extend the controller duration as frames arrive.  Only grow, never
+      // shrink, and update even during playback so the timeline stays correct.
+      final newDurationMs = (_totalFrames / _fps * 1000).round();
+      if (newDurationMs > (_playController.duration?.inMilliseconds ?? 0)) {
         _playController.duration = Duration(milliseconds: newDurationMs);
       }
     });
@@ -171,14 +173,21 @@ class _ViewerScreenState extends State<ViewerScreen>
 
   void _onPlayTick() {
     if (!_isPlaying) return;
-    final frame = (_playController.value * (_totalFrames - 1)).round();
-    if (frame != _currentFrame) {
-      setState(() => _currentFrame = frame.clamp(0, _totalFrames - 1));
+    // Map controller position to a frame index using total expected frames so
+    // the mesh and video timelines are always aligned even while streaming.
+    final total = _totalExpectedFrames > 0 ? _totalExpectedFrames : _totalFrames;
+    final targetFrame = (_playController.value * (total - 1)).round();
+    // Clamp to loaded frames — show the last available frame while buffering.
+    final meshFrame = targetFrame.clamp(0, _totalFrames - 1);
+    if (meshFrame != _currentFrame) {
+      setState(() => _currentFrame = meshFrame);
     }
     if (_videoInitialized) {
-      final videoMs = (_playController.value *
-              _videoController.value.duration.inMilliseconds)
-          .round();
+      // Use fps to convert frame → time so it's independent of how many
+      // frames are currently loaded.
+      final videoMs = (targetFrame / _fps * 1000)
+          .round()
+          .clamp(0, _videoController.value.duration.inMilliseconds);
       _videoController.seekTo(Duration(milliseconds: videoMs));
     }
   }
@@ -188,11 +197,12 @@ class _ViewerScreenState extends State<ViewerScreen>
       _isPlaying = !_isPlaying;
       if (_isPlaying) {
         if (_videoInitialized) _videoController.play();
-        if (_currentFrame >= _totalFrames - 1) {
+        final total = _totalExpectedFrames > 0 ? _totalExpectedFrames : _totalFrames;
+        if (_currentFrame >= total - 1) {
           _playController.forward(from: 0);
         } else {
           _playController.forward(
-              from: _currentFrame / (_totalFrames - 1).toDouble());
+              from: total > 1 ? _currentFrame / (total - 1).toDouble() : 0.0);
         }
       } else {
         if (_videoInitialized) _videoController.pause();
@@ -210,10 +220,10 @@ class _ViewerScreenState extends State<ViewerScreen>
       _isPlaying = false;
       _currentFrame = frame.clamp(0, _totalFrames - 1);
     });
-    if (_videoInitialized && _totalFrames > 1) {
-      final ratio = _currentFrame / (_totalFrames - 1);
-      final videoMs =
-          (ratio * _videoController.value.duration.inMilliseconds).round();
+    if (_videoInitialized) {
+      // Use fps directly so the video position is correct regardless of how
+      // many frames are currently loaded.
+      final videoMs = (_currentFrame / _fps * 1000).round();
       _videoController.seekTo(Duration(milliseconds: videoMs));
     }
   }
