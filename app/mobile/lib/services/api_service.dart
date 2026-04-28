@@ -28,7 +28,18 @@ class ApiService {
           receiveTimeout: AppConfig.uploadTimeout,
           sendTimeout: AppConfig.uploadTimeout,
           responseType: ResponseType.bytes,
-        ));
+        )) {
+    // Attach the server API key on every request when configured.
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) {
+        final key = AppConfig.serverApiKey;
+        if (key.isNotEmpty) {
+          options.headers['X-Api-Key'] = key;
+        }
+        handler.next(options);
+      },
+    ));
+  }
 
   /// Check server health.
   Future<bool> isServerReachable() async {

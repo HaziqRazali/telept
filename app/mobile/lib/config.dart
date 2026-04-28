@@ -9,6 +9,7 @@ class AppConfig {
   static const String _kServerUrl = 'server_url';
   static const String _kGeminiApiKey = 'gemini_api_key';
   static const String _kBleDevicesJson = 'ble_devices_json';
+  static const String _kServerApiKey = 'server_api_key';
 
   /// Fallback URL compiled into the app. Edit this if you always use the same
   /// server and don't want to configure it on first launch.
@@ -18,12 +19,15 @@ class AppConfig {
   static String _serverUrl = defaultServerUrl;
   static String _geminiApiKey = '';
   static String _bleDevicesJson = '';
+  static String _serverApiKey = '';
 
   /// Current server base URL (stored in SharedPreferences).
   static String get serverUrl => _serverUrl;
   static String get geminiApiKey => _geminiApiKey;
   static bool get hasGeminiKey => _geminiApiKey.isNotEmpty;
   static String get bleDevicesJson => _bleDevicesJson;
+  /// Optional API key sent as X-Api-Key header. Empty string = no auth.
+  static String get serverApiKey => _serverApiKey;
 
   static String get processEndpoint => '$_serverUrl/process';
   static String get processParamsEndpoint => '$_serverUrl/process_params';
@@ -43,6 +47,7 @@ class AppConfig {
     _serverUrl = prefs.getString(_kServerUrl) ?? defaultServerUrl;
     _geminiApiKey = prefs.getString(_kGeminiApiKey) ?? '';
     _bleDevicesJson = prefs.getString(_kBleDevicesJson) ?? '';
+    _serverApiKey = prefs.getString(_kServerApiKey) ?? '';
   }
 
   /// Persist a new server URL. Takes effect immediately.
@@ -57,6 +62,13 @@ class AppConfig {
     _geminiApiKey = key.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kGeminiApiKey, _geminiApiKey);
+  }
+
+  /// Persist a new server API key. Takes effect immediately.
+  static Future<void> setServerApiKey(String key) async {
+    _serverApiKey = key.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kServerApiKey, _serverApiKey);
   }
 
   /// Persist the BLE devices JSON (list of {name, serviceID, charID} objects).

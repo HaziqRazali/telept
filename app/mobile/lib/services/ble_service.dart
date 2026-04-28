@@ -92,6 +92,8 @@ class BleService {
 
   StreamSubscription<DiscoveredEventArgs>? _scanSub;
   StreamSubscription<BluetoothLowEnergyStateChangedEventArgs>? _stateSub;
+  StreamSubscription? _charNotifySub;
+  StreamSubscription? _connStateSub;
 
   // Capture state
   bool _capturing = false;
@@ -220,7 +222,10 @@ class BleService {
       }
     });
 
-    _manager.characteristicNotified.listen((cargs) {
+    // Cancel any previous subscription before registering a new one so that
+    // re-starts (after stop/start or addSource) don't accumulate listeners.
+    await _charNotifySub?.cancel();
+    _charNotifySub = _manager.characteristicNotified.listen((cargs) {
       final ts = DateTime.now().millisecondsSinceEpoch;
 
       for (final ent in Map.from(_dsPeripherals).entries) {
@@ -257,7 +262,8 @@ class BleService {
       }
     });
 
-    _manager.connectionStateChanged.listen((dargs) {
+    await _connStateSub?.cancel();
+    _connStateSub = _manager.connectionStateChanged.listen((dargs) {
       if (dargs.state == ConnectionState.disconnected) {
         _dropPeripheral(dargs.peripheral);
         // Immediately re-populate _dsPeripherals from the known map so the
@@ -343,7 +349,9 @@ class BleService {
 
     await _manager.stopDiscovery();
     await _scanSub?.cancel();
-    for (final p in _dsPeripherals.values) {
+    await _charNotifySub?.cancel();
+    await _connStateSub?.cancel();
+    for (final p in List.of(_dsPeripherals.values)) {
       try { await _manager.disconnect(p); } catch (_) {}
     }
     _activeSources.clear();

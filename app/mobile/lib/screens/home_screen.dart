@@ -224,7 +224,20 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        if (status == 'done') break;
+        if (status == 'done') {
+          // Final fetch: drain any frames produced between the last poll and
+          // completion, and send from_frame = nextFrame so the server can
+          // detect that the client has received everything and clean up the job.
+          final partial = await _api.fetchPartialParams(jobId, nextFrame);
+          if (partial.frameCount > 0) {
+            final newFrames = await _runFk(mhr, partial);
+            notifier.value = List.unmodifiable([...notifier.value, ...newFrames]);
+            nextFrame += partial.frameCount;
+          }
+          // One more call with the updated nextFrame so the server knows we're done.
+          await _api.fetchPartialParams(jobId, nextFrame);
+          break;
+        }
       }
     } catch (_) {
       // Background fetch errors are non-fatal; the user can still scrub what they have.
@@ -260,6 +273,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _showServerSettings(BuildContext context) async {
     final serverController = TextEditingController(text: AppConfig.serverUrl);
     final geminiController = TextEditingController(text: AppConfig.geminiApiKey);
+    final apiKeyController = TextEditingController(text: AppConfig.serverApiKey);
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -285,6 +299,27 @@ class _HomeScreenState extends State<HomeScreen> {
               decoration: const InputDecoration(
                 labelText: 'Server URL',
                 hintText: 'http://192.168.x.x:8000',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Server API Key',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Set API_KEY on the server to enable. Leave blank to disable.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: apiKeyController,
+              autocorrect: false,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Server API Key',
+                hintText: 'optional',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -319,6 +354,7 @@ class _HomeScreenState extends State<HomeScreen> {
           FilledButton(
             onPressed: () async {
               await AppConfig.setServerUrl(serverController.text.trim());
+              await AppConfig.setServerApiKey(apiKeyController.text.trim());
               await AppConfig.setGeminiApiKey(geminiController.text.trim());
               if (ctx.mounted) Navigator.pop(ctx);
               _showSnack('Settings saved');

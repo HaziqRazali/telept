@@ -37,3 +37,9 @@ TEMP_DIR = os.getenv("TEMP_DIR", "/tmp/sam3d_server")
 
 # Whether to use the real SAM3DBody model (False = return rest-pose stub)
 USE_SAM3D = os.getenv("USE_SAM3D", "0") == "1"
+
+# Optional shared secret for simple API key auth.
+# Set the API_KEY environment variable on the server to enable it.
+# The Flutter app must then be configured with the same key in Settings.
+# Leave unset (or empty) to disable auth (default: open, local-network only).
+API_KEY = os.getenv("API_KEY", "")

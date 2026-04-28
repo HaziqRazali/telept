@@ -25,7 +25,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from config import HOST, MAX_UPLOAD_SIZE_MB, PORT, TEMP_DIR, USE_SAM3D
+from config import HOST, MAX_UPLOAD_SIZE_MB, PORT, TEMP_DIR, USE_SAM3D, API_KEY
 from mesh_gen import generate_stub_meshes, generate_sam3d_meshes, generate_sam3d_params
 
 logging.basicConfig(level=logging.INFO)
@@ -68,9 +68,38 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Optional API-key middleware
+# ---------------------------------------------------------------------------
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import JSONResponse as StarletteJSONResponse
+
+
+class _ApiKeyMiddleware(BaseHTTPMiddleware):
+    """Require X-Api-Key header on all routes except /health."""
+
+    async def dispatch(self, request: StarletteRequest, call_next):
+        if request.url.path != "/health" and API_KEY:
+            key = request.headers.get("X-Api-Key", "")
+            if key != API_KEY:
+                return StarletteJSONResponse(
+                    {"detail": "Unauthorized"},
+                    status_code=401,
+                )
+        return await call_next(request)
+
+
+if API_KEY:
+    app.add_middleware(_ApiKeyMiddleware)
+    logger.info("API key auth enabled.")
+else:
+    logger.warning("API key auth is DISABLED. Set API_KEY env var to enable.")
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +122,10 @@ async def process_video(video: UploadFile = File(...)):
     # Create a unique working directory and job id
     job_id = uuid.uuid4().hex
     work_dir = tempfile.mkdtemp(dir=TEMP_DIR)
-    video_path = os.path.join(work_dir, video.filename or "upload.mp4")
+    # Strip any directory components from the client-supplied filename to
+    # prevent path-traversal attacks (e.g. filename="../../etc/x.mp4").
+    safe_name = os.path.basename(video.filename or "upload.mp4") or "upload.mp4"
+    video_path = os.path.join(work_dir, safe_name)
 
     # --- save uploaded video to disk -------------------------------------
     try:
@@ -115,7 +147,7 @@ async def process_video(video: UploadFile = File(...)):
         shutil.rmtree(work_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
-    logger.info("Received %s (%.1f MB) → job %s", video.filename, total_bytes / 1e6, job_id)
+    logger.info("Received %s (%.1f MB) → job %s", safe_name, total_bytes / 1e6, job_id)
 
     # Register job
     with _jobs_lock:
@@ -180,7 +212,8 @@ async def process_video_params(video: UploadFile = File(...)):
 
     job_id = uuid.uuid4().hex
     work_dir = tempfile.mkdtemp(dir=TEMP_DIR)
-    video_path = os.path.join(work_dir, video.filename or "upload.mp4")
+    safe_name = os.path.basename(video.filename or "upload.mp4") or "upload.mp4"
+    video_path = os.path.join(work_dir, safe_name)
 
     try:
         total_bytes = 0
@@ -201,7 +234,7 @@ async def process_video_params(video: UploadFile = File(...)):
         shutil.rmtree(work_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
-    logger.info("Received %s (%.1f MB) → params job %s", video.filename, total_bytes / 1e6, job_id)
+    logger.info("Received %s (%.1f MB) → params job %s", safe_name, total_bytes / 1e6, job_id)
 
     with _jobs_lock:
         _jobs[job_id] = {
@@ -367,9 +400,22 @@ async def get_result_params_partial(job_id: str, from_frame: int = 0):
         raise HTTPException(status_code=500, detail=job["error"] or "Processing failed")
 
     body = _build_params_binary(job, from_frame=from_frame)
+
+    # If the job is done and the client has received all frames, schedule
+    # cleanup now.  This covers the streaming path where the client never
+    # calls /result_params and would otherwise leave the job in memory forever.
+    with _jobs_lock:
+        job_done = job["status"] == "done"
+        frames_ready = job["params_frames_ready"]
+    bg = None
+    if job_done and from_frame >= frames_ready:
+        bg = _cleanup_task(job["work_dir"], job_id)
+        logger.debug("Scheduling cleanup for completed params job %s (all frames fetched)", job_id)
+
     return Response(
         content=bytes(body),
         media_type="application/octet-stream",
+        background=bg,
     )
 
 
