@@ -301,7 +301,7 @@ ax_opti.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False
 for sp in ax_opti.spines.values():
     sp.set_edgecolor("#333333")
 _ph_opti = ax_opti.text(0.5, 0.5,
-                         "Click 'Load Optitrack'\nto open optitrack.avi",
+                         "Click 'Load Optitrack mjpeg (.avi)",
                          transform=ax_opti.transAxes, ha="center", va="center",
                          color="#555555", fontsize=10)
 ax_opti.set_title("optitrack.avi", color="white", fontsize=9, pad=3)
@@ -324,10 +324,10 @@ ax_orb.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
 for sp in ax_orb.spines.values():
     sp.set_edgecolor("#333333")
 _ph_orb = ax_orb.text(0.5, 0.5,
-                       "Click 'Load Orbbec'\nto open orbbec.mp4",
+                       "Click 'Load RGB.mp4",
                        transform=ax_orb.transAxes, ha="center", va="center",
                        color="#555555", fontsize=10)
-ax_orb.set_title("orbbec.mp4", color="white", fontsize=9, pad=3)
+ax_orb.set_title("rgb.mp4", color="white", fontsize=9, pad=3)
 
 # ── rubber-band rectangle patches over each video panel ───────────────────────
 _opti_rect = mpatches.Rectangle((0, 0), 0, 0, linewidth=1.5,
