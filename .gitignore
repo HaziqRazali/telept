@@ -38,3 +38,5 @@ data/
 *.zip
 my_scripts/orbbec_scripts/Log/
 my_scripts/data_visualization/temp.py
+test.ply
+telept/

@@ -1,13 +1,14 @@
 /// Decoded SMPL parameters from the server's compact binary response.
 ///
 /// Binary layout (little-endian):
-///   magic       : uint32  (0x534D504C = 'SMPL')
-///   frame_count : uint32
-///   params_per_frame : uint32  (76)
-///   fps         : float32
-///   params      : frame_count × 76 × float32
-///                   [go(3), body_pose(63), betas(10)]
-///   valid       : frame_count × uint8
+///   magic            : uint32  (0x534D504C = 'SMPL')
+///   frame_count      : uint32
+///   params_per_frame : uint32  (79)
+///   fps              : float32
+///   focal_length     : float32  (estimated pixels, 0 if unknown)
+///   params           : frame_count × 79 × float32
+///                        [go(3), body_pose(63), betas(10), cam_t(3)]
+///   valid            : frame_count × uint8
 library;
 
 import 'dart:typed_data';
@@ -15,23 +16,21 @@ import 'dart:typed_data';
 class SmplParamsResult {
   final int frameCount;
   final double fps;
+  final double focalLength;
 
-  /// Flat array: [frameCount × 76] float32
-  /// Frame i: params[i*76 .. i*76+76]
-  ///   go:        params[i*76 +  0 ..  2]  (3 floats, axis-angle)
-  ///   body_pose: params[i*76 +  3 .. 65]  (63 floats)
-  ///   betas:     params[i*76 + 66 .. 75]  (10 floats)
+  /// Flat array: [frameCount × 79] float32
   final Float32List params;
 
   /// 1 = valid detection, 0 = no person detected
   final Uint8List valid;
 
-  static const int paramsPerFrame = 76;
+  static const int paramsPerFrame = 79;
   static const int _magic = 0x534D504C;
 
   SmplParamsResult({
     required this.frameCount,
     required this.fps,
+    required this.focalLength,
     required this.params,
     required this.valid,
   });
@@ -49,8 +48,12 @@ class SmplParamsResult {
     final paramsPerFrameRead = bd.getUint32(offset, Endian.little); offset += 4;
     final fps = bd.getFloat32(offset, Endian.little); offset += 4;
 
-    if (paramsPerFrameRead != paramsPerFrame) {
-      throw FormatException('Unexpected params_per_frame: $paramsPerFrameRead');
+    // focal_length added in v2 header (paramsPerFrame == 79).
+    double focalLength = 0.0;
+    if (paramsPerFrameRead == paramsPerFrame) {
+      focalLength = bd.getFloat32(offset, Endian.little); offset += 4;
+    } else {
+      throw FormatException('Unexpected params_per_frame: $paramsPerFrameRead (expected $paramsPerFrame)');
     }
 
     final paramCount = frameCount * paramsPerFrame;
@@ -65,6 +68,7 @@ class SmplParamsResult {
     return SmplParamsResult(
       frameCount: frameCount,
       fps: fps,
+      focalLength: focalLength,
       params: params,
       valid: valid,
     );
@@ -86,6 +90,12 @@ class SmplParamsResult {
   List<double> betas(int i) {
     final base = i * paramsPerFrame + 66;
     return List<double>.generate(10, (k) => params[base + k]);
+  }
+
+  /// Extract cam_t[3] = [tx, ty, tz] camera-space translation for frame [i].
+  List<double> camT(int i) {
+    final base = i * paramsPerFrame + 76;
+    return [params[base], params[base + 1], params[base + 2]];
   }
 
   bool isValid(int i) => valid[i] != 0;

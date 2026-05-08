@@ -1,10 +1,16 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../config.dart';
-import '../models/mesh_meta.dart';
+import '../models/mesh_frame.dart';
+import '../models/sensor_sample.dart';
+import '../models/mhr_params_result.dart';
 import '../services/api_service.dart';
-import '../services/smpl_model.dart';
+import '../services/ble_service.dart';
+import '../services/mhr_model.dart';
+import 'record_screen.dart';
 import 'viewer_screen.dart';
 
 /// Home screen with a "Record Video" button and server upload flow.
@@ -24,98 +30,22 @@ class _HomeScreenState extends State<HomeScreen> {
   double _uploadProgress = 0;
   double _serverProgress = 0; // 0.0–1.0, frames_done/total_frames
 
-  Future<void> _recordAndProcess() async {
-    // 1. Record video using the device camera
-    final XFile? video = await _picker.pickVideo(
-      source: ImageSource.camera,
-      maxDuration: const Duration(seconds: 60),
-    );
+  @override
+  void initState() {
+    super.initState();
+    // Start BLE scanning so the sensor is ready before the user presses Record.
+    bleService.start(context);
+  }
 
-    if (video == null) {
+  Future<void> _recordAndProcess() async {
+    final result = await Navigator.of(context).push<RecordResult>(
+      MaterialPageRoute(builder: (_) => const RecordScreen()),
+    );
+    if (result == null) {
       _showSnack('Recording cancelled');
       return;
     }
-
-    setState(() {
-      _isProcessing = true;
-      _statusText = 'Checking server...';
-      _uploadProgress = 0;
-    });
-
-    try {
-      // 2. Check server health
-      final reachable = await _api.isServerReachable();
-      if (!reachable) {
-        throw const ApiException('Cannot reach server. Check Wi-Fi and server URL.');
-      }
-
-      // 3. Upload and process
-      setState(() => _statusText = 'Uploading video...');
-
-      final paramsResult = await _api.processVideoParams(
-        video.path,
-        onProgress: (p) {
-          setState(() {
-            _uploadProgress = p;
-            if (p < 0.5) {
-              _statusText = 'Uploading video...';
-              _serverProgress = 0;
-            } else {
-              _serverProgress = ((p - 0.5) / 0.5).clamp(0.0, 1.0);
-              final pct = (_serverProgress * 100).toInt();
-              _statusText = 'Processing on server... $pct%';
-            }
-          });
-        },
-      );
-
-      // Run SMPL FK on device (pure Dart, ~0.5-1s for 108 frames)
-      setState(() => _statusText = 'Computing 3D frames...');
-      final smpl = SmplModel.instance;
-      final frames = <dynamic>[];
-      for (int i = 0; i < paramsResult.frameCount; i++) {
-        if (paramsResult.isValid(i)) {
-          frames.add(smpl.forward(
-            go: paramsResult.go(i),
-            bodyPose: paramsResult.bodyPose(i),
-            betas: paramsResult.betas(i),
-          ));
-        } else {
-          // No detection: empty frame
-          frames.add(smpl.forward(
-            go: List.filled(3, 0.0),
-            bodyPose: List.filled(63, 0.0),
-            betas: List.filled(10, 0.0),
-          ));
-        }
-        // Yield every 10 frames so the UI can update
-        if (i % 10 == 0) await Future.microtask(() {});
-      }
-
-      final result = ProcessingResult(
-        meta: MeshMeta(frameCount: paramsResult.frameCount, fps: paramsResult.fps),
-        frames: List.unmodifiable(frames),
-      );
-
-      setState(() {
-        _isProcessing = false;
-        _statusText = '';
-        _serverProgress = 0;
-      });
-
-      if (!mounted) return;
-
-      // 4. Navigate to the 3D viewer
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ViewerScreen(result: result, videoPath: video.path),
-        ),
-      );
-    } on ApiException catch (e) {
-      _showError(e.message);
-    } catch (e) {
-      _showError('Unexpected error: $e');
-    }
+    await _processVideo(result.videoPath, sensorTimeline: result.sensorTimeline);
   }
 
   Future<void> _pickVideoFromGallery() async {
@@ -124,80 +54,193 @@ class _HomeScreenState extends State<HomeScreen> {
       _showSnack('No video selected');
       return;
     }
+    await _processVideo(video.path);
+  }
 
+
+  // ---------------------------------------------------------------------------
+  // Core streaming processing flow
+  // ---------------------------------------------------------------------------
+
+  Future<void> _processVideo(String videoPath,
+      {List<SensorSample>? sensorTimeline}) async {
     setState(() {
       _isProcessing = true;
       _statusText = 'Checking server...';
       _uploadProgress = 0;
+      _serverProgress = 0;
     });
 
     try {
+      // 1. Health check
       final reachable = await _api.isServerReachable();
       if (!reachable) {
         throw const ApiException('Cannot reach server. Check Wi-Fi and server URL.');
       }
 
+      // 2. Upload video, get job_id immediately
       setState(() => _statusText = 'Uploading video...');
-
-      final paramsResult = await _api.processVideoParams(
-        video.path,
-        onProgress: (p) {
-          setState(() {
-            _uploadProgress = p;
-            if (p < 0.5) {
-              _statusText = 'Uploading video...';
-              _serverProgress = 0;
-            } else {
-              _serverProgress = ((p - 0.5) / 0.5).clamp(0.0, 1.0);
-              final pct = (_serverProgress * 100).toInt();
-              _statusText = 'Processing on server... $pct%';
-            }
-          });
-        },
+      final jobId = await _api.uploadVideo(
+        videoPath,
+        onSendProgress: (p) => setState(() {
+          _uploadProgress = p;
+          _statusText = 'Uploading video... ${(p * 100).toInt()}%';
+        }),
       );
 
-      setState(() => _statusText = 'Computing 3D frames...');
-      final smpl = SmplModel.instance;
-      final frames = <dynamic>[];
-      for (int i = 0; i < paramsResult.frameCount; i++) {
-        if (paramsResult.isValid(i)) {
-          frames.add(smpl.forward(
-            go: paramsResult.go(i),
-            bodyPose: paramsResult.bodyPose(i),
-            betas: paramsResult.betas(i),
-          ));
-        } else {
-          frames.add(smpl.forward(
-            go: List.filled(3, 0.0),
-            bodyPose: List.filled(63, 0.0),
-            betas: List.filled(10, 0.0),
-          ));
+      // 3. Poll until minStartFrames are ready (or job is done)
+      setState(() => _statusText = 'Processing on server...');
+      final totalFramesNotifier = ValueNotifier<int>(0);
+      while (mounted) {
+        await Future.delayed(const Duration(milliseconds: 800));
+        if (!mounted) return;
+
+        final progress = await _api.pollProgress(jobId);
+        final status = progress['status'] as String;
+
+        if (status == 'error') {
+          throw ApiException(progress['error'] as String? ?? 'Server processing failed');
         }
-        if (i % 10 == 0) await Future.microtask(() {});
+
+        final framesDone = (progress['frames_done'] as num).toInt();
+        final totalFrames = (progress['total_frames'] as num).toInt();
+        if (totalFrames > 0) {
+          totalFramesNotifier.value = totalFrames;
+          setState(() {
+            _serverProgress = framesDone / totalFrames;
+            _statusText = 'Processing on server... ${(_serverProgress * 100).toInt()}%';
+          });
+        }
+
+        if (status == 'done' || framesDone >= AppConfig.minStartFrames) break;
       }
-
-      final result = ProcessingResult(
-        meta: MeshMeta(frameCount: paramsResult.frameCount, fps: paramsResult.fps),
-        frames: List.unmodifiable(frames),
-      );
-
-      setState(() {
-        _isProcessing = false;
-        _statusText = '';
-        _serverProgress = 0;
-      });
-
       if (!mounted) return;
 
+      // 4. Fetch the initial batch of frames
+      final initialParams = await _api.fetchPartialParams(jobId, 0);
+      if (!mounted) return;
+
+      // 5. Run FK on device for the initial batch
+      setState(() => _statusText = 'Computing 3D frames...');
+      final mhr = MhrModel.instance;
+      await mhr.load();
+      final initialFrames = await _runFk(mhr, initialParams);
+      if (!mounted) return;
+
+      final fps = initialParams.fps > 0 ? initialParams.fps : 30.0;
+      final framesNotifier = ValueNotifier<List<MeshFrame>>(initialFrames);
+
+      setState(() {
+        _statusText = '';
+        // Keep _isProcessing = true so buttons remain disabled until background loop ends.
+      });
+
+      // 6. Open the viewer immediately with what we have
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ViewerScreen(result: result, videoPath: video.path),
+          builder: (_) => ViewerScreen.streaming(
+            framesNotifier: framesNotifier,
+            streamingFps: fps,
+            videoPath: videoPath,
+            totalFramesNotifier: totalFramesNotifier,
+            focalLength: initialParams.focalLength,
+            sensorTimeline: sensorTimeline,
+          ),
         ),
+      );
+
+      // 7. Continue fetching remaining frames in the background
+      await _streamRemainingFrames(
+        jobId: jobId,
+        notifier: framesNotifier,
+        totalFramesNotifier: totalFramesNotifier,
+        mhr: mhr,
+        nextFrame: initialParams.frameCount,
       );
     } on ApiException catch (e) {
       _showError(e.message);
     } catch (e) {
       _showError('Unexpected error: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _statusText = '';
+          _serverProgress = 0;
+        });
+      }
+    }
+  }
+
+  /// Run MHR forward kinematics on [params] and return the resulting frames.
+  Future<List<MeshFrame>> _runFk(MhrModel mhr, MhrParamsResult params) async {
+    final frames = <MeshFrame>[];
+    for (int i = 0; i < params.frameCount; i++) {
+      if (params.isValid(i)) {
+        frames.add(mhr.forward(
+          modelParams: params.modelParams(i),
+          camT: params.camT(i),
+        ));
+      } else {
+        frames.add(mhr.forward(
+          modelParams: Float32List(204),
+        ));
+      }
+      if (i % 10 == 0) await Future.microtask(() {});
+    }
+    return frames;
+  }
+
+  /// Background loop that keeps appending frames to [notifier] until the job is done.
+  Future<void> _streamRemainingFrames({
+    required String jobId,
+    required ValueNotifier<List<MeshFrame>> notifier,
+    required ValueNotifier<int> totalFramesNotifier,
+    required MhrModel mhr,
+    required int nextFrame,
+  }) async {
+    try {
+      while (mounted) {
+        await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) break;
+
+        final progress = await _api.pollProgress(jobId);
+        final status = progress['status'] as String;
+
+        if (status == 'error') break; // non-fatal; user already has partial data
+
+        final framesDone  = (progress['frames_done']  as num).toInt();
+        final totalFrames = (progress['total_frames'] as num).toInt();
+
+        // Keep totalFramesNotifier current so the scrubber grey bar stays accurate.
+        if (totalFrames > 0) totalFramesNotifier.value = totalFrames;
+
+        if (framesDone > nextFrame) {
+          final partial = await _api.fetchPartialParams(jobId, nextFrame);
+          if (partial.frameCount > 0) {
+            final newFrames = await _runFk(mhr, partial);
+            notifier.value = List.unmodifiable([...notifier.value, ...newFrames]);
+            nextFrame += partial.frameCount;
+          }
+        }
+
+        if (status == 'done') {
+          // Final fetch: drain any frames produced between the last poll and
+          // completion, and send from_frame = nextFrame so the server can
+          // detect that the client has received everything and clean up the job.
+          final partial = await _api.fetchPartialParams(jobId, nextFrame);
+          if (partial.frameCount > 0) {
+            final newFrames = await _runFk(mhr, partial);
+            notifier.value = List.unmodifiable([...notifier.value, ...newFrames]);
+            nextFrame += partial.frameCount;
+          }
+          // One more call with the updated nextFrame so the server knows we're done.
+          await _api.fetchPartialParams(jobId, nextFrame);
+          break;
+        }
+      }
+    } catch (_) {
+      // Background fetch errors are non-fatal; the user can still scrub what they have.
     }
   }
 
@@ -230,6 +273,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _showServerSettings(BuildContext context) async {
     final serverController = TextEditingController(text: AppConfig.serverUrl);
     final geminiController = TextEditingController(text: AppConfig.geminiApiKey);
+    final apiKeyController = TextEditingController(text: AppConfig.serverApiKey);
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -255,6 +299,27 @@ class _HomeScreenState extends State<HomeScreen> {
               decoration: const InputDecoration(
                 labelText: 'Server URL',
                 hintText: 'http://192.168.x.x:8000',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Server API Key',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Set API_KEY on the server to enable. Leave blank to disable.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: apiKeyController,
+              autocorrect: false,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Server API Key',
+                hintText: 'optional',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -289,6 +354,7 @@ class _HomeScreenState extends State<HomeScreen> {
           FilledButton(
             onPressed: () async {
               await AppConfig.setServerUrl(serverController.text.trim());
+              await AppConfig.setServerApiKey(apiKeyController.text.trim());
               await AppConfig.setGeminiApiKey(geminiController.text.trim());
               if (ctx.mounted) Navigator.pop(ctx);
               _showSnack('Settings saved');
@@ -311,6 +377,20 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('TelePT Body Capture'),
         centerTitle: true,
         actions: [
+          // BLE connection status indicator
+          ValueListenableBuilder<bool>(
+            valueListenable: bleService.isConnected,
+            builder: (_, connected, __) {
+              return IconButton(
+                tooltip: connected ? 'Sensor connected – tap to manage' : 'No sensor – tap to add',
+                icon: Icon(
+                  Icons.bluetooth,
+                  color: connected ? Colors.greenAccent : Colors.grey,
+                ),
+                onPressed: () => bleService.showBleDialog(context),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Server settings',
