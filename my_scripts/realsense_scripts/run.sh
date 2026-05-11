@@ -1,1 +1,0 @@
-realsense-viewer to run the camera
