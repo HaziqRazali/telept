@@ -3,11 +3,8 @@
 
 ## Order of steps
 
-```
-[Optional] prepare_smpl2ab.py   convert source data (fit3d JSON, etc.) → smpl2ab-compatible .npz
-                                                    ↓
-           run_smpl2bsm.sh      fit BSM skeleton to SMPL motion (markers → IK → video)
-```
+1. *(Optional)* `prepare_smpl2ab.py` — convert source data (fit3d JSON, etc.) → smpl2ab-compatible `.npz`
+2. `run_smpl2bsm.sh` — fit BSM skeleton to SMPL motion (markers → IK → video)
 
 ---
 
