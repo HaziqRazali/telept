@@ -77,6 +77,7 @@ for arg in "$@"; do
     --load_camera_settings) LOAD_CAM_FLAG="--load_camera_settings" ;;
     --z_up)            ZUPFLAG="--z_up" ;;
     --body_model=*)    BODY_MODEL="${arg#*=}" ;;
+    --id_path=*)       ID_PATH_FLAG="--id_path=${arg#*=}" ;;
   esac
 done
 
@@ -190,5 +191,5 @@ python smpl2ab/show_ab_results.py \
   --smpl_markers_path="$MARKER_DICT" \
   --body_model="$BODY_MODEL" \
   --output="$VIDEO_OUT" \
-  $GUI_FLAG $OFFSET_FLAG $LOAD_CAM_FLAG $ZUPFLAG
+  $GUI_FLAG $OFFSET_FLAG $LOAD_CAM_FLAG $ZUPFLAG $ID_PATH_FLAG
 echo "Video saved to: $VIDEO_OUT"

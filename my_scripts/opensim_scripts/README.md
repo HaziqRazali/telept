@@ -23,15 +23,19 @@ Full pipeline shortcut — runs Steps 1+2+3 in one go.
   --gui            opens interactive aitviewer instead of exporting video
   --vis-only       skip Steps 1+2 if outputs already exist (re-use cached IK)
 -->
-cd ~/code/SMPL2AddBiomechanics
-./run_smpl2bsm.sh \
-  /home/haziq/datasets/mocap/data/fit3d/train/s03/smplx/dumbbell_biceps_curls.json \
-  output/dumbbell_biceps_curls \
-  --markers=full --gui
-
 cd ~/code/SMPL2AddBiomechanics && ~/datasets/telept/my_scripts/opensim_scripts/run_smpl2bsm.sh \
   /home/haziq/datasets/mocap/data/fit3d/train/s03/smplx/dumbbell_biceps_curls.json \
   output/dumbbell_biceps_curls --markers=full --vis --vis-only
+
+<!--
+Step 0 (fit3d only): convert fit3d JSON → SMPL .npz
+  inp:  fit3d .json (rotation matrices, 50 fps)
+  out:  /tmp/smpl2ab_dumbbell_biceps_curls/dumbbell_biceps_curls/dumbbell_biceps_curls.npz
+-->
+python ~/datasets/telept/my_scripts/opensim_scripts/prepare_smpl2ab.py \
+  --input /home/haziq/datasets/mocap/data/fit3d/train/s03/smplx/dumbbell_biceps_curls.json \
+  --output /tmp/smpl2ab_dumbbell_biceps_curls --gender neutral
+# note: --fps defaults to 50 (fit3d is always 50 fps; not stored in the JSON)
 
 <!--
 Step 1: SMPL → markers.trc
@@ -45,7 +49,15 @@ Step 1: SMPL → markers.trc
             markers.trc               ← 3D marker trajectories
 -->
 cd ~/code/SMPL2AddBiomechanics
+
+# example
 python smpl2ab/smpl2addbio.py -i models/bsm/sample_motion/01 -o output
+
+# fit3d
+python smpl2ab/smpl2addbio.py \
+  -i /tmp/smpl2ab_dumbbell_biceps_curls/dumbbell_biceps_curls \
+  -o output/dumbbell_biceps_curls \
+  --osim models/bsm/bsm.osim --marker_dict smpl2ab/data/bsm_markers.yaml --no_confirm
 
 <!--
 Step 2: IK + model scaling (AddBiomechanics engine)
@@ -62,7 +74,12 @@ Step 2: IK + model scaling (AddBiomechanics engine)
   python ~/code/AddBiomechanics/server/engine/src/engine.py output/01 osim_results
 -->
 cd ~/code/SMPL2AddBiomechanics
+
+# example
 python ~/code/AddBiomechanics/server/engine/src/engine.py output/01 osim_results
+
+# fit3d
+python ~/code/AddBiomechanics/server/engine/src/engine.py output/dumbbell_biceps_curls/dumbbell_biceps_curls osim_results
 
 <!--
 Step 3: visualize — superimpose SMPL mesh + OpenSim IK skeleton, export video
@@ -72,10 +89,21 @@ Step 3: visualize — superimpose SMPL mesh + OpenSim IK skeleton, export video
   out:  superimp_res.mp4  (cwd) — add --gui for interactive viewer instead
 -->
 cd ~/code/SMPL2AddBiomechanics
+
+# example
 python smpl2ab/show_ab_results.py \
   --osim_path=output/01/osim_results/Models/match_markers_but_ignore_physics.osim \
   --mot_path=output/01/osim_results/IK/01_01_poses_segment_0_ik.mot \
   --smpl_motion_path=models/bsm/sample_motion/01/01_01_poses.npz \
+  --body_model smpl \
+  --gui
+
+# fit3d
+python smpl2ab/show_ab_results.py \
+  --osim_path=output/dumbbell_biceps_curls/dumbbell_biceps_curls/osim_results/Models/match_markers_but_ignore_physics.osim \
+  --mot_path=output/dumbbell_biceps_curls/dumbbell_biceps_curls/osim_results/IK/dumbbell_biceps_curls_segment_0_ik.mot \
+  --smpl_motion_path=/tmp/smpl2ab_dumbbell_biceps_curls/dumbbell_biceps_curls/dumbbell_biceps_curls.npz \
+  --body_model smpl \
   --gui
 
 ---
