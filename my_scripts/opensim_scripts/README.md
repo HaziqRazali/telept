@@ -14,6 +14,26 @@ conda activate addbiomechanics
 cd ~/code/SMPL2AddBiomechanics
 
 <!--
+Full pipeline shortcut — runs Steps 1+2+3 in one go.
+  Input:  fit3d JSON (auto-converted to .npz via prepare_smpl2ab.py internally)
+  Output: output/dumbbell_biceps_curls/<trial>/osim_results/
+            IK/<trial>_segment_0_ik.mot   ← joint angles
+            Models/match_markers_but_ignore_physics.osim ← scaled model
+  --markers=full   uses all 105 virtual markers (vs --markers=bony for 57 anatomical-only)
+  --gui            opens interactive aitviewer instead of exporting video
+  --vis-only       skip Steps 1+2 if outputs already exist (re-use cached IK)
+-->
+cd ~/code/SMPL2AddBiomechanics
+./run_smpl2bsm.sh \
+  /home/haziq/datasets/mocap/data/fit3d/train/s03/smplx/dumbbell_biceps_curls.json \
+  output/dumbbell_biceps_curls \
+  --markers=full --gui
+
+cd ~/code/SMPL2AddBiomechanics && ~/datasets/telept/my_scripts/opensim_scripts/run_smpl2bsm.sh \
+  /home/haziq/datasets/mocap/data/fit3d/train/s03/smplx/dumbbell_biceps_curls.json \
+  output/dumbbell_biceps_curls --markers=full --vis --vis-only
+
+<!--
 Step 1: SMPL → markers.trc
   reads SMPL .npz → places virtual markers at anatomical landmarks → writes .trc
   inp:  models/bsm/sample_motion/01/  ← dir of SMPL .npz files (one per trial, e.g. 01_01_poses.npz)
@@ -24,7 +44,8 @@ Step 1: SMPL → markers.trc
           trials/01_01_poses/
             markers.trc               ← 3D marker trajectories
 -->
-python smpl2ab/smpl2addbio.py -i models/bsm/sample_motion/01 -o output/01
+cd ~/code/SMPL2AddBiomechanics
+python smpl2ab/smpl2addbio.py -i models/bsm/sample_motion/01 -o output
 
 <!--
 Step 2: IK + model scaling (AddBiomechanics engine)
@@ -40,6 +61,7 @@ Step 2: IK + model scaling (AddBiomechanics engine)
   NOTE: non-fatal errors about plotting.py and "Geometry already exists" are safe to ignore
   python ~/code/AddBiomechanics/server/engine/src/engine.py output/01 osim_results
 -->
+cd ~/code/SMPL2AddBiomechanics
 python ~/code/AddBiomechanics/server/engine/src/engine.py output/01 osim_results
 
 <!--
@@ -49,10 +71,12 @@ Step 3: visualize — superimpose SMPL mesh + OpenSim IK skeleton, export video
         models/bsm/sample_motion/01/01_01_poses.npz                          ← original SMPL motion
   out:  superimp_res.mp4  (cwd) — add --gui for interactive viewer instead
 -->
+cd ~/code/SMPL2AddBiomechanics
 python smpl2ab/show_ab_results.py \
   --osim_path=output/01/osim_results/Models/match_markers_but_ignore_physics.osim \
   --mot_path=output/01/osim_results/IK/01_01_poses_segment_0_ik.mot \
-  --smpl_motion_path=models/bsm/sample_motion/01/01_01_poses.npz
+  --smpl_motion_path=models/bsm/sample_motion/01/01_01_poses.npz \
+  --gui
 
 ---
 
