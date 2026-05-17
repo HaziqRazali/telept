@@ -86,10 +86,11 @@ python ~/code/AddBiomechanics/server/engine/src/engine.py output/dumbbell_biceps
 
 <!--
 Step 3 (optional, band exercises): resistance band force synthesis → OpenSim ID → joint torques
-  inp:  .osim + .mot from Step 2,  SMPL .npz from Step 0
+  inp:  .osim + .mot from Step 2,  band_endpoints.npz (anchor_pos, limb_pos, time — supply explicitly)
   out:  output/<trial>/band_id.npz  ← joint torques + band geometry (pass to Step 4 as --id_path)
-  --arm      left or right (which arm/leg attaches to the band)
-  --mass_kg  equivalent constant load in kg  (force = mass_kg × 9.81 N)
+  --endpoints  path to band_endpoints.npz  (anchor_pos (3,), limb_pos (T,3), time (T,))
+  --arm        left or right (which arm/leg attaches to the band)
+  --force_n    band force magnitude in Newtons  (e.g. 49.05 N ≈ 5 kg load)
 -->
 cd ~/code/SMPL2AddBiomechanics
 
@@ -97,9 +98,9 @@ cd ~/code/SMPL2AddBiomechanics
 python ~/datasets/telept/my_scripts/opensim_scripts/resistance_band_id.py \
   --osim_path output/dumbbell_biceps_curls/dumbbell_biceps_curls/osim_results/Models/match_markers_but_ignore_physics.osim \
   --mot_path  output/dumbbell_biceps_curls/dumbbell_biceps_curls/osim_results/IK/dumbbell_biceps_curls_segment_0_ik.mot \
-  --npz       /tmp/smpl2ab_dumbbell_biceps_curls/dumbbell_biceps_curls/dumbbell_biceps_curls.npz \
+  --endpoints output/dumbbell_biceps_curls/band_endpoints.npz \
   --output    output/dumbbell_biceps_curls/band_id.npz \
-  --mass_kg   5.0
+  --force_n   49.05
 
 <!--
 Step 4: visualize — superimpose SMPL mesh + OpenSim IK skeleton, export video
