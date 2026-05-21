@@ -14,3 +14,10 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+# Run instructions
+
+cd /home/haziq/telept/dart_scripts/aruco_tracker
+export PATH=/home/haziq/flutter/bin:$PATH
+export DARTCV_CACHE_DIR=$HOME/.cache/dartcv
+flutter run -d linux
