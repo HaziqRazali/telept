@@ -1,0 +1,13 @@
+{
+  "input_dim": 42,
+  "output_dim": 130,
+  "n_kpts": 21,
+  "token_width": 2,
+  "input_format": "x,y",
+  "kpts_source": "mediapipe",
+  "kpts_config": "mediapipe_full_body",
+  "prediction_scope": "full_body",
+  "kpts_score_threshold": 0.5,
+  "body_model": "mhr",
+  "decoder_type": "simple_mlp"
+}
