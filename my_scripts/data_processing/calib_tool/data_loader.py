@@ -123,7 +123,8 @@ def load_c3d(path: Path = C3D_PATH) -> dict:
 
     labels = list(c["parameters"]["POINT"]["LABELS"]["value"])
     pts = c["data"]["points"]  # (4, N, F) x,y,z,residual
-    xyz = pts[:3].astype(np.float64)
+    # ezc3d returns (3, N, F); reorder to (N, 3, F) for sane indexing
+    xyz = pts[:3].astype(np.float64).transpose(1, 0, 2)
     n, _, f = xyz.shape
     fps = float(c["parameters"]["POINT"]["RATE"]["value"][0])
 
