@@ -3,6 +3,7 @@
 Run:  python3 app.py          (then open http://localhost:7860)
 
 Stages:
+  Tab 0  Data            - set the iPad video + C3D paths and load them
   Tab 1  Marker layout   - click where the 6 reflective markers sit on the board
   Tab 2  Sync            - LED blink: ROI + threshold (video), 3D box (mocap),
                            cross-correlation offset + fine-tune
@@ -13,6 +14,7 @@ Stages:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -38,15 +40,76 @@ from trim import apply_trim, save_trim
 from calibrate import run_calibration
 
 # ----------------------------------------------------------------------
-# Load data once (cached; fast after first run)
+# Data globals -- filled by load_data() (from the "0. Data" tab, or on app
+# start with the configured / last-saved paths).  Handlers read these at
+# call time, so switching data in the UI re-targets every tab.
 # ----------------------------------------------------------------------
-FRAMES, TIMES = pre_extract_frames(config.VIDEO_PATH)
-MOCAP = load_c3d(config.C3D_PATH)
-N_VID = len(FRAMES)
-N_MOC = MOCAP["n_frames"]
-FPS_M = MOCAP["fps"]
-IMG_H, IMG_W = 1280, 720
-VIDEO_DUR = float(TIMES[-1])
+FRAMES: list = []
+TIMES: np.ndarray = np.array([])
+MOCAP: dict = {}
+N_VID = 0
+N_MOC = 0
+FPS_M = 100.0
+IMG_H, IMG_W = 720, 1280
+VIDEO_DUR = 0.0
+CURRENT_VIDEO_PATH = str(config.VIDEO_PATH)
+CURRENT_C3D_PATH = str(config.C3D_PATH)
+FRAME_ARR: np.ndarray | None = None  # (N, H, W, 3) uint8 BGR - all frames in RAM
+
+
+# ----------------------------------------------------------------------
+# Tab 0 - Data loading
+# ----------------------------------------------------------------------
+def load_data(video_path: str, c3d_path: str):
+    """Load the iPad video + C3D mocap file into the module globals.
+
+    Returns GUI updates in this order: (status, video_scrub, mocap_scrub,
+    sync_scrub, trim_start, trim_end, video_view, mocap3d, mocap2d).
+    """
+    global FRAMES, TIMES, MOCAP, N_VID, N_MOC, FPS_M, VIDEO_DUR
+    global CURRENT_VIDEO_PATH, CURRENT_C3D_PATH, FRAME_ARR, IMG_H, IMG_W
+    video_path = str(Path(video_path).expanduser()).strip()
+    c3d_path = str(Path(c3d_path).expanduser()).strip()
+    try:
+        if not Path(video_path).is_file():
+            raise FileNotFoundError(f"Video not found: {video_path}")
+        if not Path(c3d_path).is_file():
+            raise FileNotFoundError(f"C3D not found: {c3d_path}")
+        frames, times = pre_extract_frames(video_path)
+        mocap = load_c3d(c3d_path)
+    except Exception as e:
+        return (f"ERROR: {e}", *([gr.update()] * 6), None, None, None)
+
+    FRAMES, TIMES, MOCAP = frames, times, mocap
+    N_VID = len(FRAMES)
+    N_MOC = MOCAP["n_frames"]
+    FPS_M = MOCAP["fps"]
+    VIDEO_DUR = float(TIMES[-1])
+    CURRENT_VIDEO_PATH = video_path
+    CURRENT_C3D_PATH = c3d_path
+    config.save_settings(video_path, c3d_path)
+
+    # Preload every frame into RAM (BGR uint8) for seamless scrubbing.
+    FRAME_ARR = _preload_frames(FRAMES)
+    IMG_H, IMG_W = FRAME_ARR.shape[1], FRAME_ARR.shape[2]
+
+    img_v = _render_video(0, None, 1.0)
+    img3 = render_mocap_3d(MOCAP, 0, None)
+    img2 = render_mocap_2d(MOCAP, 0, "top", None)
+    msg = (f"Loaded:\n  video: {Path(video_path).name}  "
+           f"({N_VID} frames, {VIDEO_DUR:.1f} s, "
+           f"{FRAME_ARR.nbytes / 1e6:.0f} MB in RAM)\n"
+           f"  mocap: {Path(c3d_path).name}  "
+           f"({N_MOC} frames @ {FPS_M:.0f} Hz)\n\n"
+           "Proceed to tabs 1-4.")
+    return (msg,
+            gr.update(maximum=max(N_VID - 1, 0), value=0),
+            gr.update(maximum=max(N_MOC - 1, 0), value=0),
+            gr.update(maximum=VIDEO_DUR, value=0),
+            gr.update(maximum=VIDEO_DUR, value=0),
+            gr.update(maximum=VIDEO_DUR, value=VIDEO_DUR),
+            img_v, img3, img2,
+            gr.update(value=CURRENT_VIDEO_PATH))
 
 DEFAULT_STATE = {
     "placed": [],          # list of [x_mm, y_mm]
@@ -59,18 +122,46 @@ DEFAULT_STATE = {
     "mocap_bin": None,
     "threshold": 128.0,
     "offset": 0.0,
+    "zoom": 1.0,
 }
 
 
 def _frame_bgr(i: int) -> np.ndarray:
+    """BGR frame; served from the in-RAM array after load_data (seamless scrub)."""
+    if FRAME_ARR is not None:
+        return FRAME_ARR[i]
     return cv2.imread(str(FRAMES[i]))
+
+
+def _rgb(img: np.ndarray) -> np.ndarray:
+    """BGR numpy image -> RGB for gr.Image display."""
+    return img[..., ::-1]
+
+
+def _preload_frames(frames: list) -> np.ndarray:
+    """Decode all cached JPEGs into one (N, H, W, 3) uint8 BGR array."""
+    first = cv2.imread(str(frames[0]))
+    H, W = first.shape[:2]
+    arr = np.empty((len(frames), H, W, 3), np.uint8)
+    arr[0] = first
+    for i in range(1, len(frames)):
+        arr[i] = cv2.imread(str(frames[i]))
+    return arr
+
+
+def _frame_size() -> tuple[int, int]:
+    """Return (W, H) of the video frames."""
+    if FRAME_ARR is not None:
+        return FRAME_ARR.shape[2], FRAME_ARR.shape[1]
+    img = _frame_bgr(0)
+    return img.shape[1], img.shape[0]
 
 
 # ----------------------------------------------------------------------
 # Tab 1 - Marker layout
 # ----------------------------------------------------------------------
 def tab1_render_canvas(placed) -> np.ndarray:
-    return ml.render_canvas(placed)
+    return _rgb(ml.render_canvas(placed))
 
 
 def tab1_on_click(evt: gr.SelectData, state):
@@ -78,25 +169,26 @@ def tab1_on_click(evt: gr.SelectData, state):
     x_mm, y_mm = ml.px_to_mm(x_px, y_px)
     x_mm, y_mm = ml.snap_to_grid(x_mm, y_mm)
     if len(state["placed"]) >= config.NUM_MARKERS:
-        return (ml.render_canvas(state["placed"]), state,
+        return (_rgb(ml.render_canvas(state["placed"])), state,
                 f"Already have {config.NUM_MARKERS} markers - use Undo to remove one.")
     state["placed"].append([x_mm, y_mm])
     named = [(f"{i+1}", p[0], p[1]) for i, p in enumerate(state["placed"])]
     msg = "Placed: " + ", ".join(f"{i+1}@({x:.0f},{y:.0f})mm"
                                  for i, (x, y) in enumerate(state["placed"]))
-    return ml.render_canvas(named), state, msg
+    return _rgb(ml.render_canvas(named)), state, msg
 
 
 def tab1_undo(state):
     if state["placed"]:
         state["placed"].pop()
     named = [(f"{i+1}", p[0], p[1]) for i, p in enumerate(state["placed"])]
-    return ml.render_canvas(named), state, f"{len(state['placed'])} markers placed"
+    return (_rgb(ml.render_canvas(named)), state,
+            f"{len(state['placed'])} markers placed")
 
 
 def tab1_clear(state):
     state["placed"] = []
-    return ml.render_canvas([]), state, "cleared"
+    return _rgb(ml.render_canvas([])), state, "cleared"
 
 
 def tab1_verify(state):
@@ -124,49 +216,157 @@ def tab1_save(state):
 
 
 # ----------------------------------------------------------------------
-# Tab 2 - Sync
+# Tab 2 - Sync (video ROI editor)
 # ----------------------------------------------------------------------
-def _draw_roi_on_frame(idx: int, roi) -> np.ndarray:
-    img = _frame_bgr(idx)
+def _zoom_crop_region(roi, zoom: float) -> tuple[int, int, int, int]:
+    """Return (x0, y0, cw, ch) of the zoom crop in full-frame pixels."""
+    W, H = _frame_size()
+    if not zoom or zoom <= 1.0:
+        return 0, 0, W, H
+    cx, cy = W // 2, H // 2
     if roi is not None:
-        x0, y0, x1, y1 = roi
-        cv2.rectangle(img, (x0, y0), (x1, y1), (0, 255, 0), 2)
-        cv2.putText(img, "LED ROI", (x0, max(y0 - 8, 15)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
-    return img
+        cx, cy = (roi[0] + roi[2]) // 2, (roi[1] + roi[3]) // 2
+    cw = max(int(W / zoom), 1)
+    ch = max(int(H / zoom), 1)
+    x0 = max(0, min(cx - cw // 2, W - cw))
+    y0 = max(0, min(cy - ch // 2, H - ch))
+    return x0, y0, cw, ch
+
+
+def _render_video(idx: int, roi, zoom: float = 1.0) -> np.ndarray:
+    """Full (or zoom-cropped) frame with the ROI rect drawn, returned as RGB.
+
+    Drawn on a copy so the shared in-RAM frame array is never painted on.
+    """
+    full = _frame_bgr(int(idx))
+    x0, y0, cw, ch = _zoom_crop_region(roi, zoom)
+    if zoom and zoom > 1.0:
+        img = full[y0:y0 + ch, x0:x0 + cw].copy()
+    else:
+        img = full.copy()
+
+    if roi is not None:
+        rx0, ry0, rx1, ry1 = (int(v) for v in roi)
+        bx0 = max(rx0 - x0, 0)
+        by0 = max(ry0 - y0, 0)
+        bx1 = min(rx1 - x0, img.shape[1])
+        by1 = min(ry1 - y0, img.shape[0])
+        if bx1 > bx0 and by1 > by0:
+            cv2.rectangle(img, (bx0, by0), (bx1, by1), (0, 255, 0), 2)
+            cv2.putText(img, "LED ROI", (bx0, max(by0 - 8, 15)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
+                        cv2.LINE_AA)
+    return _rgb(img)
+
+
+def _roi_crop(idx: int, roi) -> np.ndarray | None:
+    """Upscaled RGB crop of the ROI box contents (for the ROI zoom pane)."""
+    if roi is None:
+        return None
+    x0, y0, x1, y1 = (int(v) for v in roi)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    img = _frame_bgr(int(idx))[y0:y1, x0:x1]
+    h = img.shape[0]
+    if h > 0:
+        scale = min(4.0, 220.0 / max(h, 1))
+        if scale > 1.0:
+            img = cv2.resize(img, None, fx=scale, fy=scale,
+                             interpolation=cv2.INTER_NEAREST)
+    return _rgb(img)
 
 
 def tab2_show_video(idx, state):
-    img = _draw_roi_on_frame(int(idx), state["video_roi"])
-    return img
+    return _render_video(int(idx), state["video_roi"], state.get("zoom", 1.0))
 
 
 def tab2_show_zoom(idx, state):
+    return _roi_crop(int(idx), state["video_roi"])
+
+
+def tab2_render(idx, state):
+    """Combined scrub handler: main view + ROI pane in ONE event (half the
+    round-trips -> less lag)."""
+    i = int(idx)
+    return (_render_video(i, state["video_roi"], state.get("zoom", 1.0)),
+            _roi_crop(i, state["video_roi"]))
+
+
+def tab2_zoom(z, idx, state):
+    """Zoom slider: re-render main view + ROI pane at the current frame."""
+    state["zoom"] = float(z)
+    return (_render_video(int(idx), state["video_roi"], state["zoom"]),
+            _roi_crop(int(idx), state["video_roi"]))
+
+
+def tab2_nudge(corner, axis, delta, idx, state):
+    """Fine-tune one corner of the ROI box by (+/-)delta px."""
     roi = state["video_roi"]
     if roi is None:
-        return None
-    x0, y0, x1, y1 = roi
-    img = _frame_bgr(int(idx))[y0:y1, x0:x1]
-    return img
+        return (state, "Draw the ROI box first (2 clicks on the video).",
+                None, None)
+    x0, y0, x1, y1 = (int(v) for v in roi)
+    if corner == "tl":
+        if axis == "x":
+            x0 += delta
+        else:
+            y0 += delta
+    elif corner == "tr":
+        if axis == "x":
+            x1 += delta
+        else:
+            y0 += delta
+    elif corner == "bl":
+        if axis == "x":
+            x0 += delta
+        else:
+            y1 += delta
+    else:  # br
+        if axis == "x":
+            x1 += delta
+        else:
+            y1 += delta
+    W, H = _frame_size()
+    x0 = max(0, min(x0, W))
+    x1 = max(0, min(x1, W))
+    y0 = max(0, min(y0, H))
+    y1 = max(0, min(y1, H))
+    if x0 == x1 or y0 == y1:
+        return (state, "Box collapsed - keep a positive size.", None, None)
+    x0, x1 = min(x0, x1), max(x0, x1)
+    y0, y1 = min(y0, y1), max(y0, y1)
+    state["video_roi"] = [x0, y0, x1, y1]
+    state["roi_click"] = None
+    return (state,
+            f"ROI = {state['video_roi']}",
+            _render_video(int(idx), state["video_roi"], state.get("zoom", 1.0)),
+            _roi_crop(int(idx), state["video_roi"]))
 
 
 def tab2_video_click(evt: gr.SelectData, state, idx):
-    x, y = evt.index
+    """2-click ROI draw; maps click coords back to full-frame px when zoomed."""
+    cx, cy = evt.index
+    x0, y0, _, _ = _zoom_crop_region(state["video_roi"], state.get("zoom", 1.0))
+    x, y = min(int(cx) + x0, max(_frame_size()[0] - 1, 0)), \
+           min(int(cy) + y0, max(_frame_size()[1] - 1, 0))
     if state["roi_click"] is None:
         state["roi_click"] = (x, y)
-        img = _draw_roi_on_frame(int(idx), state["video_roi"])
-        return (state, "ROI: click opposite corner", img)
+        img = _render_video(int(idx), state["video_roi"], state.get("zoom", 1.0))
+        return (state, "ROI: click opposite corner", img,
+                _roi_crop(int(idx), state["video_roi"]))
     (x0, y0), (x1, y1) = state["roi_click"], (x, y)
     state["video_roi"] = [min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)]
     state["roi_click"] = None
-    img = _draw_roi_on_frame(int(idx), state["video_roi"])
-    return state, "ROI set. Press 'Compute traces'.", img
+    img = _render_video(int(idx), state["video_roi"], state.get("zoom", 1.0))
+    return (state, "ROI set. Press 'Compute traces'.", img,
+            _roi_crop(int(idx), state["video_roi"]))
 
 
-def tab2_reset_roi(state):
+def tab2_reset_roi(idx, state):
     state["video_roi"] = None
     state["roi_click"] = None
-    return state, "ROI cleared"
+    return (state, "ROI cleared",
+            _render_video(int(idx), None, state.get("zoom", 1.0)), None)
 
 
 def _box_arrays(state):
@@ -204,7 +404,8 @@ def tab2_set_box(x, y, z, half, state):
 def tab2_compute_traces(state):
     if state["video_roi"] is None:
         return (state, None, None, "Set the video ROI first (2 clicks).")
-    trace, times = compute_video_trace(tuple(state["video_roi"]))
+    trace, times = compute_video_trace(tuple(state["video_roi"]),
+                                       video_path=CURRENT_VIDEO_PATH)
     state["video_trace"] = trace.tolist()
     state["video_bin"] = threshold_trace(trace, state["threshold"]).tolist()
     box = _box_arrays(state)
@@ -259,11 +460,12 @@ def tab2_sync_scrub(t_video, state):
     vi = int(np.argmin(np.abs(TIMES - t_video)))
     mi = mocap_index_for_video_time(TIMES[vi], state["offset"], FPS_M)
     mi = max(0, min(mi, N_MOC - 1))
-    img_v = _draw_roi_on_frame(vi, state["video_roi"])
+    img_v = _render_video(vi, state["video_roi"], state.get("zoom", 1.0))
+    zv = _roi_crop(vi, state["video_roi"])
     box = _box_arrays(state)
     img3 = render_mocap_3d(MOCAP, mi, box)
     img2 = render_mocap_2d(MOCAP, mi, "top", box)
-    return vi, mi, img_v, img3, img2
+    return vi, mi, img_v, zv, img3, img2
 
 
 def _traces_figure(state):
@@ -316,7 +518,8 @@ def tab3_save(start_s, end_s):
 # ----------------------------------------------------------------------
 def tab4_run():
     try:
-        r = run_calibration()
+        r = run_calibration(video_path=CURRENT_VIDEO_PATH,
+                            c3d_path=CURRENT_C3D_PATH)
         lines = [
             f"Used {r['n_frames_used']} frames, {r['n_correspondences']} "
             "marker correspondences",
@@ -336,22 +539,30 @@ def tab4_run():
 # ----------------------------------------------------------------------
 # Build the UI
 # ----------------------------------------------------------------------
-def _on_load():
-    img_v = _draw_roi_on_frame(0, None)
-    img3 = render_mocap_3d(MOCAP, 0, None)
-    img2 = render_mocap_2d(MOCAP, 0, "top", None)
-    return img_v, img3, img2
-
-
 def build_app():
     with gr.Blocks(title="iPad <-> Mocap Calibration") as demo:
         state = gr.State(DEFAULT_STATE.copy())
+
+        with gr.Tab("0. Data"):
+            gr.Markdown("Set the paths to your **iPad video (.mp4)** and "
+                        "**mocap C3D (.c3d)** file, then click **Load data**. "
+                        "Your choice is remembered in `output/settings.json` "
+                        "and pre-filled next time.")
+            _saved = config.load_settings()
+            vid_input = gr.Textbox(label="iPad video (.mp4)",
+                                   value=_saved.get("video_path",
+                                                    str(config.VIDEO_PATH)))
+            c3d_input = gr.Textbox(label="Mocap C3D (.c3d)",
+                                   value=_saved.get("c3d_path",
+                                                    str(config.C3D_PATH)))
+            load_btn = gr.Button("Load data", variant="primary")
+            load_status = gr.Textbox(label="Status", lines=5, interactive=False)
 
         with gr.Tab("1. Marker layout"):
             gr.Markdown("Click on the **orange dots** where the reflective "
                         "markers sit (grid = 40 mm). Click 6 in total.")
             with gr.Row():
-                canvas = gr.Image(value=ml.render_canvas([]), type="numpy",
+                canvas = gr.Image(value=_rgb(ml.render_canvas([])), type="numpy",
                                   height=560, interactive=False)
                 with gr.Column():
                     ml_info = gr.Textbox(label="Placement", lines=8,
@@ -378,21 +589,43 @@ def build_app():
                 with gr.Column():
                     video_view = gr.Image(type="numpy", height=480,
                                           interactive=False)
-                    zoom_view = gr.Image(type="numpy", height=180,
-                                         interactive=False, label="ROI zoom")
-                    video_scrub = gr.Slider(0, N_VID - 1, value=0, step=1,
-                                            label="Video scrub (frame)")
+                    zoom_view = gr.Image(type="numpy", height=200,
+                                         interactive=False,
+                                         label="ROI zoom (box contents)")
+                    video_scrub = gr.Slider(0, max(N_VID - 1, 1), value=0,
+                                            step=1, label="Video scrub (frame)")
+                    zoom_slider = gr.Slider(1, 8, value=1, step=0.5,
+                                            label="Video zoom (crop around ROI)")
                     roi_status = gr.Textbox(value="Click 2 points on the video "
                                                   "to set ROI", lines=2,
                                             interactive=False)
                     with gr.Row():
                         reset_roi = gr.Button("Reset ROI")
+                    gr.Markdown("### Fine-tune ROI corners (±5 px)")
+                    with gr.Row():
+                        for _corner, _clabel in [("tl", "TL"), ("tr", "TR"),
+                                                 ("bl", "BL"), ("br", "BR")]:
+                            with gr.Column():
+                                gr.Markdown(f"**{_clabel}**")
+                                for _axis in ["x", "y"]:
+                                    with gr.Row():
+                                        for _delta, _sym in [(-1, "−"), (1, "+")]:
+                                            _b = gr.Button(f"{_axis}{_sym}")
+                                            _b.click(
+                                                lambda idx, s, c=_corner,
+                                                       a=_axis, d=_delta:
+                                                tab2_nudge(c, a, d, idx, s),
+                                                [video_scrub, state],
+                                                [state, roi_status,
+                                                 video_view, zoom_view],
+                                                show_progress="hidden")
                 with gr.Column():
                     mocap3d = gr.Image(type="numpy", height=360,
                                        interactive=False)
                     mocap2d = gr.Image(type="numpy", height=280,
                                        interactive=False)
-                    mocap_scrub = gr.Slider(0, N_MOC - 1, value=0, step=1,
+                    mocap_scrub = gr.Slider(0, max(N_MOC - 1, 1), value=0,
+                                            step=1,
                                             label="Mocap scrub (frame, review)")
                     with gr.Row():
                         auto_led = gr.Button("Auto-find LED")
@@ -401,6 +634,16 @@ def build_app():
                         by = gr.Slider(-2000, 1000, value=0, step=5, label="box Y")
                         bz = gr.Slider(-1000, 1000, value=0, step=5, label="box Z")
                     bh = gr.Slider(10, 200, value=50, step=5, label="box half-size (mm)")
+
+            gr.Markdown("### Seamless scrub (HTML5 video player)")
+            gr.Markdown("This video runs entirely in your browser, so scrubbing "
+                        "and playback have **no loading delay**. Use it to find "
+                        "the LED blink, then set the ROI box on the still frame "
+                        "above (the frame image still updates through the server "
+                        "but without the loading spinner).")
+            video_player = gr.Video(value=str(config.VIDEO_PATH), height=300,
+                                    interactive=False,
+                                    label="Raw video (instant scrub)")
 
             traces_plot = gr.Plot()
             with gr.Row():
@@ -411,15 +654,20 @@ def build_app():
                                   label="Video intensity threshold")
             offset = gr.Slider(-60, 60, value=0, step=0.01,
                                label="Offset fine-tune (s)")
-            sync_scrub = gr.Slider(0, VIDEO_DUR, value=0, step=0.01,
+            sync_scrub = gr.Slider(0, max(VIDEO_DUR, 1), value=0, step=0.01,
                                    label="Synchronized scrub (video seconds)")
             sync_info = gr.Textbox(label="Sync status", lines=3, interactive=False)
 
-            video_scrub.change(tab2_show_video, [video_scrub, state], [video_view])
-            video_scrub.change(tab2_show_zoom, [video_scrub, state], [zoom_view])
+            video_scrub.change(tab2_render, [video_scrub, state],
+                               [video_view, zoom_view], show_progress="hidden")
+            zoom_slider.change(tab2_zoom, [zoom_slider, video_scrub, state],
+                               [video_view, zoom_view], show_progress="hidden")
             video_view.select(tab2_video_click, [state, video_scrub],
-                              [state, roi_status, video_view])
-            reset_roi.click(tab2_reset_roi, [state], [state, roi_status])
+                              [state, roi_status, video_view, zoom_view],
+                              show_progress="hidden")
+            reset_roi.click(tab2_reset_roi, [video_scrub, state],
+                            [state, roi_status, video_view, zoom_view],
+                            show_progress="hidden")
             mocap_scrub.change(tab2_show_mocap, [mocap_scrub, state],
                                [mocap3d, mocap2d])
             auto_led.click(tab2_auto_led, [state], [state, sync_info])
@@ -435,17 +683,16 @@ def build_app():
             offset.change(tab2_offset, [offset, state], [state, traces_plot])
             save_sync_btn.click(tab2_save_sync, [state], [sync_info])
             sync_scrub.change(tab2_sync_scrub, [sync_scrub, state],
-                              [video_scrub, mocap_scrub, video_view, mocap3d, mocap2d])
-
-        demo.load(_on_load, None, [video_view, mocap3d, mocap2d])
+                              [video_scrub, mocap_scrub, video_view, zoom_view,
+                               mocap3d, mocap2d], show_progress="hidden")
 
         with gr.Tab("3. Trim"):
             gr.Markdown("Set a shared start/end (in video seconds). Both streams "
                         "get the same duration.")
-            start_s = gr.Slider(0, VIDEO_DUR, value=0, step=0.01,
+            start_s = gr.Slider(0, max(VIDEO_DUR, 1), value=0, step=0.01,
                                 label="Trim start (s)")
-            end_s = gr.Slider(0, VIDEO_DUR, value=VIDEO_DUR, step=0.01,
-                              label="Trim end (s)")
+            end_s = gr.Slider(0, max(VIDEO_DUR, 1), value=max(VIDEO_DUR, 1),
+                              step=0.01, label="Trim end (s)")
             with gr.Row():
                 trim_apply = gr.Button("Preview trim")
                 trim_save = gr.Button("Save trim")
@@ -460,6 +707,15 @@ def build_app():
             cal_out = gr.Textbox(label="Calibration result", lines=14,
                                  interactive=False)
             cal_run.click(tab4_run, None, [cal_out])
+
+        # --- Tab 0 data-loading wiring --------------------------------
+        _data_outputs = [load_status, video_scrub, mocap_scrub, sync_scrub,
+                         start_s, end_s, video_view, mocap3d, mocap2d,
+                         video_player]
+        load_btn.click(load_data, [vid_input, c3d_input], _data_outputs)
+        # Auto-load on start so the tool works out of the box (uses the
+        # configured / last-saved paths).
+        demo.load(load_data, [vid_input, c3d_input], _data_outputs)
 
     return demo
 

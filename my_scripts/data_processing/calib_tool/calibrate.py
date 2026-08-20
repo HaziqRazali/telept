@@ -16,13 +16,16 @@ import cv2
 import numpy as np
 
 from config import (
+    C3D_PATH,
     INTRINSICS_FILE,
     MARKERS_FILE,
     MARKER_NAMES,
+    SYNC_FILE,
     TRANSFORM_FILE,
     TRIM_FILE,
+    VIDEO_PATH,
 )
-from data_loader import load_c3d
+from data_loader import load_c3d, pre_extract_frames
 from intrinsics import board_object_points, detect_board
 from sync import mocap_index_for_video_time
 
@@ -215,15 +218,17 @@ def compute_transform(
     return result
 
 
-def run_calibration(verbose: bool = True) -> dict:
+def run_calibration(
+    video_path=VIDEO_PATH, c3d_path=C3D_PATH, verbose: bool = True
+) -> dict:
     """Full Stage E from saved files (intrinsics, markers, trim, sync)."""
     intrinsics = load_intrinsics()
     markers_mm = load_markers_mm()
     trim = json.loads(TRIM_FILE.read_text())
-    sync = json.loads(__import__("config").SYNC_FILE.read_text())
+    sync = json.loads(SYNC_FILE.read_text())
     offset = sync["offset_s"]
-    mocap = load_c3d()
-    video_times = np.load(__import__("config").FRAME_TIMESTAMPS_FILE)
+    mocap = load_c3d(c3d_path)
+    _, video_times = pre_extract_frames(video_path)
     # re-apply trim to get frame ranges (start/end in video seconds)
     from trim import apply_trim
     trim_full = apply_trim(video_times, mocap, offset, trim["start_s"], trim["end_s"])

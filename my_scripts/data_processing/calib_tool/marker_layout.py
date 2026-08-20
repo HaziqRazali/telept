@@ -135,18 +135,41 @@ def render_canvas(placed: list[tuple[str, float, float]] | None = None) -> np.nd
 # ----------------------------------------------------------------------
 # Verification vs C3D (rigid distance matching)
 # ----------------------------------------------------------------------
-def c3d_marker_mean_positions(c3d: dict) -> dict[str, np.ndarray]:
-    """Mean 3D position (mm) of each Board marker over its visible frames."""
-    out = {}
-    for i, name in enumerate(c3d["labels"]):
-        if name not in MARKER_NAMES:
+def c3d_marker_pairwise_distances(c3d: dict, names: list[str] | None = None) -> np.ndarray:
+    """(N,N) pairwise distances (mm) between markers, robust to board motion.
+
+    Distances are invariant under rigid motion, so for each marker pair we
+    take the MEDIAN of the per-frame distance over all frames where BOTH
+    markers are visible.  This stays correct even if the board is moved
+    during the capture (a mean-POSITION approach would be smeared and wrong).
+    Returns np.nan for pairs that are never co-visible.
+    """
+    names = list(names) if names is not None else list(MARKER_NAMES)
+    n = len(names)
+    label_idx = {name: i for i, name in enumerate(c3d["labels"])}
+    xyz, pres = c3d["xyz"], c3d["presence"]
+    D = np.zeros((n, n))
+    for a in range(n):
+        ia = label_idx.get(names[a])
+        if ia is None:
+            D[a, :] = D[:, a] = np.nan
             continue
-        vis = c3d["presence"][i]
-        if vis.sum() == 0:
-            out[name] = None
-            continue
-        out[name] = c3d["xyz"][i, :, vis].mean(axis=0)
-    return out
+        for b in range(a + 1, n):
+            ib = label_idx.get(names[b])
+            if ib is None:
+                D[a, b] = D[b, a] = np.nan
+                continue
+            both = pres[ia] & pres[ib]
+            if both.sum() == 0:
+                D[a, b] = D[b, a] = np.nan
+                continue
+            # NB: xyz[ia] is (3, F); mask the LAST axis to keep (3, n).
+            # (xyz[ia, :, both] would reorder axes and give (n, 3) -- wrong.)
+            pa = xyz[ia][:, both]
+            pb = xyz[ib][:, both]
+            d = np.linalg.norm(pa - pb, axis=0)
+            D[a, b] = D[b, a] = float(np.median(d))
+    return D
 
 
 def pairwise_distances(points: np.ndarray) -> np.ndarray:
@@ -157,35 +180,36 @@ def pairwise_distances(points: np.ndarray) -> np.ndarray:
 def verify_markers(markers_mm: np.ndarray, c3d: dict) -> dict:
     """Match clicked markers (board frame, Nx3) to C3D labels.
 
-    Brute-forces the best permutation (N<=6 so 720 perms max) minimizing the
-    mean absolute difference between the clicked pairwise-distance matrix and
-    the C3D one.
+    Compares pairwise-distance matrices; the C3D side is built per-frame with
+    a robust median (see c3d_marker_pairwise_distances), so the board may
+    move during the capture.  Brute-forces the best permutation (N<=6 so 720
+    perms max) minimizing the mean absolute difference between the two
+    matrices.
     """
     n = markers_mm.shape[0]
-    c3d_pos = c3d_marker_mean_positions(c3d)
-    missing = [m for m in MARKER_NAMES if c3d_pos.get(m) is None]
-    if missing:
-        return {"ok": False, "error": f"missing markers in C3D: {missing}"}
-
-    c3d_mat = np.stack([c3d_pos[m] for m in MARKER_NAMES], axis=0)  # (6,3)
     d_click = pairwise_distances(markers_mm)
-    d_c3d = pairwise_distances(c3d_mat)
+    d_c3d = c3d_marker_pairwise_distances(c3d, MARKER_NAMES[:n])
+
+    # markers never visible (all their pairs are NaN)
+    bad = [MARKER_NAMES[i] for i in range(n) if np.isnan(d_c3d[i]).all()]
+    if bad:
+        return {"ok": False, "error": f"missing markers in C3D: {bad}"}
 
     best_perm, best_cost = None, np.inf
     for perm in itertools.permutations(range(n)):
-        cost = np.mean(np.abs(d_click - d_c3d[np.ix_(perm, perm)]))
+        diff = np.abs(d_click - d_c3d[np.ix_(perm, perm)])
+        cost = np.nanmean(diff[np.triu_indices(n, 1)])
         if cost < best_cost:
             best_cost, best_perm = cost, perm
 
     assigned = [MARKER_NAMES[i] for i in best_perm]
-    # per-marker distance error for reporting
     err = np.abs(d_click - d_c3d[np.ix_(best_perm, best_perm)])
     iu = np.triu_indices(n, 1)
     return {
         "ok": True,
         "assigned": assigned,
-        "mean_dist_err_mm": float(err[iu].mean()),
-        "max_dist_err_mm": float(err[iu].max()),
+        "mean_dist_err_mm": float(np.nanmean(err[iu])),
+        "max_dist_err_mm": float(np.nanmax(err[iu])),
         "n_markers": n,
     }
 

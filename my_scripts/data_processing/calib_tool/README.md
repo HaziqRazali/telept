@@ -23,8 +23,11 @@ Then open `http://localhost:7860` in a browser (local, or via SSH tunnel
 `ssh -L 7860:localhost:7860 user@server`, or Tailscale). No monitor needed on
 the server.
 
-## Workflow (4 tabs, in order)
+## Workflow (5 tabs, in order)
 
+0. **Data** — Set the paths to your iPad video and C3D mocap file (pre-filled
+   from `config.py` / `output/settings.json`), click *Load data*. Defaults
+   point at `/data/haziq/telept/data/NUS`.
 1. **Marker layout** — Click the 6 orange dots on the board schematic where
    the reflective markers sit (grid = 40 mm). Click order is arbitrary; the
    tool auto-matches your clicks to the C3D `Board1..Board6` labels by rigid
@@ -48,6 +51,7 @@ the server.
 | `sync.json` | time offset (`video_time = mocap_time + offset_s`) + ROI/box |
 | `trim.json` | shared trim window (video seconds) |
 | `transform.json` | `R`, `t` (mocap→camera, mm) + residual stats |
+| `settings.json` | last-used video/C3D paths (pre-filled in the Data tab) |
 
 ## Key design decisions
 
@@ -71,7 +75,7 @@ python3 test_calibration.py   # synthetic validation of the calibration math
 
 ## Files
 
-- `config.py` — paths, board params, marker names
+- `config.py` — paths (defaults + `settings.json` persistence), board params, marker names
 - `data_loader.py` — frame pre-extraction (JPEG cache + timestamps), C3D loading
 - `intrinsics.py` — chessboard detection + `calibrateCamera`
 - `marker_layout.py` — Stage-1 canvas + C3D distance verification

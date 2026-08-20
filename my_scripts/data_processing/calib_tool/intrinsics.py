@@ -44,9 +44,9 @@ def detect_board(gray: np.ndarray):
     return ok, corners
 
 
-def detect_boards_all_frames(gray_frames=None) -> list:
+def detect_boards_all_frames(video_path=VIDEO_PATH, gray_frames=None) -> list:
     """Detect the board in every cached frame; return list of (frame_idx, corners)."""
-    frames, _ = pre_extract_frames(VIDEO_PATH)
+    frames, _ = pre_extract_frames(video_path)
     results = []
     for i, fp in enumerate(frames):
         img = cv2.imread(str(fp))
@@ -57,12 +57,12 @@ def detect_boards_all_frames(gray_frames=None) -> list:
     return results
 
 
-def calibrate_intrinsics(verbose: bool = True) -> dict:
+def calibrate_intrinsics(video_path=VIDEO_PATH, verbose: bool = True) -> dict:
     """Self-calibrate camera intrinsics from all chessboard detections.
 
     Returns a result dict and writes output/intrinsics.json.
     """
-    frames, _ = pre_extract_frames(VIDEO_PATH)
+    frames, _ = pre_extract_frames(video_path)
     img0 = cv2.imread(str(frames[0]))
     h, w = img0.shape[:2]
 
@@ -95,7 +95,7 @@ def calibrate_intrinsics(verbose: bool = True) -> dict:
         per_frame_err.append(float(err))
 
     result = {
-        "video": str(VIDEO_PATH),
+        "video": str(video_path),
         "resolution": [w, h],
         "board_inner_corners": list(BOARD_INNER_CORNERS),
         "square_size_mm": SQUARE_SIZE_MM,

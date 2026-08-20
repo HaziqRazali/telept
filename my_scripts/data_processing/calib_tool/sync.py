@@ -25,12 +25,14 @@ from data_loader import load_c3d, pre_extract_frames
 # ----------------------------------------------------------------------
 # Video-side trace
 # ----------------------------------------------------------------------
-def compute_video_trace(roi: tuple[int, int, int, int]) -> tuple[np.ndarray, np.ndarray]:
+def compute_video_trace(
+    roi: tuple[int, int, int, int], video_path=VIDEO_PATH
+) -> tuple[np.ndarray, np.ndarray]:
     """Mean grayscale intensity inside ROI (x0, y0, x1, y1) per video frame.
 
     Returns (trace, video_times).
     """
-    frames, times = pre_extract_frames(VIDEO_PATH)
+    frames, times = pre_extract_frames(video_path)
     x0, y0, x1, y1 = roi
     trace = np.empty(len(frames), np.float32)
     for i, fp in enumerate(frames):
