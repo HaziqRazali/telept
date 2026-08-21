@@ -886,12 +886,18 @@ class MainWindow(QMainWindow):
         prev = QPushButton("3) Preview transform on video (sanity check)")
         prev.clicked.connect(self._on_preview_verify)
         lay.addWidget(prev)
-        self.cal_preview = ClickableLabel()
-        self.cal_preview.setMinimumHeight(260)
-        lay.addWidget(self.cal_preview, 1)
+        prow = QHBoxLayout()
+        self.cal_previews = []
+        for _ in range(3):
+            lbl = ClickableLabel()
+            lbl.setMinimumSize(150, 200)
+            self.cal_previews.append(lbl)
+            prow.addWidget(lbl, 1)
+        lay.addLayout(prow, 1)
         self.cal_preview_cap = QLabel(
             "Run steps 1-2, then click 3) to project the mocap markers "
-            "onto a video frame and check they land on the chessboard.")
+            "onto a few random trim frames and check they land on the "
+            "chessboard.")
         self.cal_preview_cap.setWordWrap(True)
         lay.addWidget(self.cal_preview_cap)
         self.cal_out = QTextEdit()
@@ -1427,12 +1433,63 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.cal_out.setText(f"ERROR: {e}")
 
-    def _on_preview_verify(self):
-        """Project the mocap Board markers into a video frame using the saved
-        transform.json - a visual sanity check of the calibration.
+    def _render_preview_frame(self, vi, R, t, K, dist, offset):
+        """Overlay the chessboard corners (green dots), the board-pose
+        markers (green rings) and the mocap markers projected through
+        transform.json (red rings) on video frame ``vi``.
 
-        Red circles = Board1..6 projected from mocap via transform.json.
-        Green circles = where the board-pose (solvePnP) puts them.
+        Returns (img BGR, caption_line) or (None, error_line).
+        """
+        img = (FRAME_ARR[vi] if FRAME_ARR is not None else
+               cv2.imread(str(config.FRAME_DIR / f"{vi:06d}.jpg")))
+        if img is None:
+            return None, f"frame {vi}: no image"
+        img = img.copy()
+        tv = float(TIMES[vi])
+        mi = mocap_index_for_video_time(tv, offset, FPS_M)
+        if mi < 0 or mi >= N_MOC:
+            return None, f"frame {vi}: mocap frame {mi} out of range"
+        label_idx = {n: i for i, n in enumerate(MOCAP["labels"])}
+        try:
+            mi_list = [label_idx[n] for n in config.MARKER_NAMES]
+        except KeyError as e:
+            return None, f"frame {vi}: marker {e} not in mocap labels"
+        if not all(MOCAP["presence"][j, mi] for j in mi_list):
+            return None, f"frame {vi}: markers not all tracked at mocap {mi}"
+
+        # chessboard corners (small green dots) for context
+        ok, corners = detect_board(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+        if not ok:
+            return None, f"frame {vi}: no chessboard detected"
+        for c in corners.reshape(-1, 2):
+            cv2.circle(img, (int(c[0]), int(c[1])), 3, (0, 220, 0), -1)
+
+        # green rings = board-pose markers (solvePnP + marker layout)
+        Rb, tb = solve_board_pose(corners, K, dist)
+        mm = load_markers_mm()
+        proj_b, _ = cv2.projectPoints(mm, cv2.Rodrigues(Rb)[0], tb, K, dist)
+        for c in proj_b[:, 0, :]:
+            cv2.circle(img, (int(c[0]), int(c[1])), 12, (0, 220, 0), 2)
+
+        # red rings = mocap markers projected via transform.json
+        Pm = MOCAP["xyz"][mi_list, :, mi]  # (6,3) mocap frame
+        Pc = (R @ Pm.T + t[:, None]).T     # (6,3) camera frame
+        proj, _ = cv2.projectPoints(Pc.astype(np.float64),
+                                    np.zeros(3), np.zeros(3), K, dist)
+        for k, c in enumerate(proj[:, 0, :]):
+            x, y = int(c[0]), int(c[1])
+            cv2.circle(img, (x, y), 12, (0, 0, 255), 2)
+            cv2.putText(img, config.MARKER_NAMES[k], (x + 14, y - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
+                        cv2.LINE_AA)
+        return img, f"frame {vi}  video {tv:.2f}s  mocap {mi} ({mi / FPS_M:.2f}s)"
+
+    def _on_preview_verify(self):
+        """Project the mocap Board markers onto a few random trim-window
+        frames using transform.json - a visual sanity check.
+
+        Red rings = Board1..6 projected from mocap via transform.json.
+        Green rings = where the board-pose (solvePnP) puts them.
         With a good calibration + correct sync they coincide on the board.
         """
         if not MOCAP:
@@ -1460,81 +1517,49 @@ class MainWindow(QMainWindow):
         dist = np.array(intr["dist_coeffs"])
         offset = float(sync.get("offset_s", 0.0))
 
-        # pick a trim-window frame with the chessboard detected (middle out)
+        # all trim-window frames where the chessboard is detected
         lo = max(0, int(np.searchsorted(TIMES, trim["start_s"])))
         hi = min(len(TIMES) - 1, int(np.searchsorted(TIMES, trim["end_s"])))
-        vi = None
-        for dv in range(0, hi - lo + 1):
-            for cand in (lo + dv, hi - dv):
-                if not (lo <= cand <= hi):
-                    continue
-                img0 = FRAME_ARR[cand] if FRAME_ARR is not None else \
-                    cv2.imread(str(config.FRAME_DIR / f"{cand:06d}.jpg"))
-                if img0 is None:
-                    continue
-                ok, _ = detect_board(cv2.cvtColor(img0, cv2.COLOR_BGR2GRAY))
-                if ok:
-                    vi = cand
-                    break
-            if vi is not None:
-                break
-        if vi is None:
+        good = []
+        for cand in range(lo, hi + 1):
+            img0 = FRAME_ARR[cand] if FRAME_ARR is not None else \
+                cv2.imread(str(config.FRAME_DIR / f"{cand:06d}.jpg"))
+            if img0 is None:
+                continue
+            ok, _ = detect_board(cv2.cvtColor(img0, cv2.COLOR_BGR2GRAY))
+            if ok:
+                good.append(cand)
+        if not good:
             self.cal_out.setText("No chessboard found in the trim window - "
                                  "nothing to preview.")
             return
 
-        img = (FRAME_ARR[vi] if FRAME_ARR is not None else
-               cv2.imread(str(config.FRAME_DIR / f"{vi:06d}.jpg"))).copy()
-        tv = float(TIMES[vi])
-        mi = mocap_index_for_video_time(tv, offset, FPS_M)
-        if mi < 0 or mi >= N_MOC:
-            self.cal_out.setText(f"mocap frame {mi} out of range for video "
-                                 f"{tv:.2f}s - check the sync offset.")
-            return
-        label_idx = {n: i for i, n in enumerate(MOCAP["labels"])}
-        try:
-            mi_list = [label_idx[n] for n in config.MARKER_NAMES]
-        except KeyError as e:
-            self.cal_out.setText(f"Marker {e} not found in the mocap labels.")
-            return
-        if not all(MOCAP["presence"][j, mi] for j in mi_list):
-            self.cal_out.setText(
-                f"Mocap Board markers not all tracked at mocap frame {mi} "
-                f"({mi / FPS_M:.2f}s) - adjust the trim window.")
-            return
+        # sample up to 3 random frames (sorted so panels run left->right)
+        if len(good) <= 3:
+            picks = list(good)
+        else:
+            rng = np.random.default_rng()
+            picks = sorted(good[i] for i in
+                           rng.choice(len(good), size=3, replace=False))
 
-        # chessboard corners (small green dots) for context
-        ok, corners = detect_board(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
-        if ok:
-            for c in corners.reshape(-1, 2):
-                cv2.circle(img, (int(c[0]), int(c[1])), 3, (0, 220, 0), -1)
+        shown = []
+        for i, lbl in enumerate(self.cal_previews):
+            if i < len(picks):
+                img, line = self._render_preview_frame(
+                    picks[i], R, t, K, dist, offset)
+                if img is not None:
+                    lbl.setArray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+                    shown.append(line)
+                else:
+                    lbl.clear()
+                    shown.append(line)
+            else:
+                lbl.clear()
 
-        # green = board-pose markers (solvePnP + marker layout)
-        if ok:
-            Rb, tb = solve_board_pose(corners, K, dist)
-            mm = load_markers_mm()
-            proj_b, _ = cv2.projectPoints(mm, cv2.Rodrigues(Rb)[0], tb, K, dist)
-            for c in proj_b[:, 0, :]:
-                cv2.circle(img, (int(c[0]), int(c[1])), 12, (0, 220, 0), 2)
-
-        # red = mocap markers projected via transform.json
-        Pm = MOCAP["xyz"][mi_list, :, mi]  # (6,3) mocap frame
-        Pc = (R @ Pm.T + t[:, None]).T     # (6,3) camera frame
-        proj, _ = cv2.projectPoints(Pc.astype(np.float64),
-                                    np.zeros(3), np.zeros(3), K, dist)
-        for k, c in enumerate(proj[:, 0, :]):
-            x, y = int(c[0]), int(c[1])
-            cv2.circle(img, (x, y), 12, (0, 0, 255), 2)
-            cv2.putText(img, config.MARKER_NAMES[k], (x + 14, y - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
-                        cv2.LINE_AA)
-
-        self.cal_preview.setArray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         self.cal_preview_cap.setText(
-            f"frame {vi}  video {tv:.2f}s  mocap {mi} ({mi / FPS_M:.2f}s)  "
-            f"offset {offset:.3f}s\n"
-            "green dots = detected chessboard; green rings = board-pose "
-            "markers; red rings = mocap markers via transform.json\n"
+            "\n".join(shown) + "\n"
+            "green dots = chessboard; green rings = board-pose markers; "
+            "red rings = mocap markers via transform.json\n"
             "Red and green should coincide on the chessboard border.")
 
     def _on_calibrate(self):
