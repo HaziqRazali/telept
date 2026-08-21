@@ -74,11 +74,12 @@ from sync import (
     auto_find_led,
     compute_mocap_trace,
     compute_video_trace,
+    load_sync,
     mocap_index_for_video_time,
     save_sync,
     threshold_trace,
 )
-from trim import apply_trim, save_trim
+from trim import apply_trim, load_trim, save_trim
 
 
 # ----------------------------------------------------------------------
@@ -459,6 +460,12 @@ class MainWindow(QMainWindow):
         self.trim_end.setValue(max(VIDEO_DUR, 0.01))
         self.offset_spin.setRange(-60.0, 60.0)
 
+        # resume convenience: pre-fill the trim boxes from a saved trim.json
+        _t = load_trim()
+        if _t is not None:
+            self.trim_start.setValue(_t["start_s"])
+            self.trim_end.setValue(_t["end_s"])
+
         # reset per-session state but keep saved markers/sync if any
         self.state.update({
             "placed": [], "video_roi": None, "roi_click": None,
@@ -775,7 +782,10 @@ class MainWindow(QMainWindow):
         compute.clicked.connect(self._on_compute_traces)
         save_sync = QPushButton("Save sync")
         save_sync.clicked.connect(self._on_save_sync)
+        load_sync = QPushButton("Load sync")
+        load_sync.clicked.connect(self._on_load_sync)
         btns.addWidget(compute); btns.addWidget(save_sync)
+        btns.addWidget(load_sync)
         btns.addStretch(1)
         root.addLayout(btns)
 
@@ -859,7 +869,10 @@ class MainWindow(QMainWindow):
         prev.clicked.connect(self._on_trim_preview)
         save = QPushButton("Save trim")
         save.clicked.connect(self._on_trim_save)
-        btns.addWidget(prev); btns.addWidget(save); btns.addStretch(1)
+        load = QPushButton("Load trim")
+        load.clicked.connect(self._on_trim_load)
+        btns.addWidget(prev); btns.addWidget(save); btns.addWidget(load)
+        btns.addStretch(1)
         lay.addLayout(btns)
         self.trim_info = QTextEdit()
         self.trim_info.setReadOnly(True)
@@ -1298,6 +1311,54 @@ class MainWindow(QMainWindow):
         self.sync_info.setText(
             f"Saved output/sync.json  offset={self.state['offset']:.3f} s")
 
+    def _on_load_sync(self):
+        """Restore the saved sync (offset, ROI, mocap box, threshold) from
+        output/sync.json and recompute the traces - resume a session."""
+        s = load_sync()
+        if s is None:
+            self.sync_info.setText("No output/sync.json yet - do the sync "
+                                   "once and click 'Save sync' first.")
+            return
+        off = float(s.get("offset_s", 0.0))
+        roi = s.get("video_roi")
+        blo = s.get("mocap_box_lo_mm")
+        bhi = s.get("mocap_box_hi_mm")
+        thr = float(s.get("video_threshold", 128.0))
+        self.state["offset"] = off
+        self.state["video_roi"] = list(roi) if roi else None
+        self.state["box_lo"] = list(blo) if blo else None
+        self.state["box_hi"] = list(bhi) if bhi else None
+        self.state["threshold"] = thr
+        # widgets (signals blocked so nothing recomputes mid-restore)
+        for wdg, v in ((self.offset_spin, off), (self.thr_slider, int(thr))):
+            wdg.blockSignals(True)
+            wdg.setValue(v)
+            wdg.blockSignals(False)
+        self.thr_value.setText(str(int(thr)))
+        if blo and bhi:
+            lo = np.array(blo)
+            hi = np.array(bhi)
+            for wdg, v in ((self.box_x, (lo[0] + hi[0]) / 2.0),
+                           (self.box_y, (lo[1] + hi[1]) / 2.0),
+                           (self.box_z, (lo[2] + hi[2]) / 2.0),
+                           (self.box_half, (hi[0] - lo[0]) / 2.0)):
+                wdg.blockSignals(True)
+                wdg.setValue(v)
+                wdg.blockSignals(False)
+        # re-render views, then recompute traces from the restored settings
+        if FRAME_ARR is not None:
+            self._update_video_views()
+        if MOCAP:
+            self._update_mocap_views()
+        self.state["video_trace"] = None
+        self.state["video_bin"] = None
+        self.state["mocap_bin"] = None
+        self._on_compute_traces()
+        self.sync_info.setText(
+            f"Loaded output/sync.json  offset={off:.3f}s, "
+            f"threshold={thr:.0f}, ROI={roi}, box={blo}..{bhi}\n"
+            "Traces recomputed - tweak if needed, then 'Save sync' to keep.")
+
     def _on_video_scrub_change(self, _v: int):
         """Video scrub slider moved: update its view + bar."""
         self._update_video_views()
@@ -1409,6 +1470,17 @@ class MainWindow(QMainWindow):
         self.trim_info.setText(
             f"Saved output/trim.json  {self.trim_start.value():.2f}s .. "
             f"{self.trim_end.value():.2f}s")
+
+    def _on_trim_load(self):
+        t = load_trim()
+        if t is None:
+            self.trim_info.setText("No output/trim.json yet - set start/end "
+                                   "and click 'Save trim' first.")
+            return
+        self.trim_start.setValue(t["start_s"])
+        self.trim_end.setValue(t["end_s"])
+        self.trim_info.setText(
+            f"Loaded output/trim.json  {t['start_s']:.2f}s .. {t['end_s']:.2f}s")
 
     # ==================================================================
     # Tab 4 handler
