@@ -307,6 +307,8 @@ class MainWindow(QMainWindow):
         }
         self._crop_ox = 0           # zoom-crop origin (full-frame px)
         self._crop_oy = 0
+        self._mocap2d_map = None    # pixel->mm map of the last 2D mocap render
+        self._box_draw = []         # clicked corners (X, Y mm) while box-drawing
 
         self._build_ui()
 
@@ -426,6 +428,8 @@ class MainWindow(QMainWindow):
             "threshold": 128.0, "offset": 0.0, "zoom": 1.0,
         })
         self.state.pop("zoom_focus", None)
+        self._box_draw = []
+        self._mocap2d_map = None
 
         self._render_canvas()
         self._update_video_views()
@@ -625,7 +629,10 @@ class MainWindow(QMainWindow):
         mcol.addWidget(self.mocap3d_view, 1)
         self.mocap2d_view = ClickableLabel()
         self.mocap2d_view.setMinimumSize(320, 220)
+        self.mocap2d_view.clicked.connect(self._on_mocap_box_click)
         mcol.addWidget(self.mocap2d_view, 1)
+        mcol.addWidget(QLabel("2D view: click 2 corners to draw the LED box "
+                              "(Z ± half from the spinboxes)"))
 
         mscrub_row = QHBoxLayout()
         self.mocap_scrub = QSlider(Qt.Horizontal)
@@ -858,7 +865,10 @@ class MainWindow(QMainWindow):
         midx = self.mocap_scrub.value()
         box = self._box_arrays()
         self.mocap3d_view.setArray(render_mocap_3d(MOCAP, midx, box))
-        self.mocap2d_view.setArray(render_mocap_2d(MOCAP, midx, "top", box))
+        img2, info = render_mocap_2d(MOCAP, midx, "top", box,
+                                     return_transform=True)
+        self.mocap2d_view.setArray(img2)
+        self._mocap2d_map = info
         self.mocap_frame_info.setText(
             f"frame {midx}/{max(N_MOC - 1, 0)}  t={midx / FPS_M:.3f}s")
 
@@ -866,6 +876,58 @@ class MainWindow(QMainWindow):
         if self.state["box_lo"] is None:
             return None
         return np.array(self.state["box_lo"]), np.array(self.state["box_hi"])
+
+    def _mocap2d_px_to_data(self, sx: int, sy: int):
+        """Map a pixel on the 2D mocap view to (X, Y) data coords (mm)."""
+        info = self._mocap2d_map
+        if info is None:
+            return None
+        bx0, by0, bw, bh = info["bbox_img"]
+        xl0, xl1 = info["xlim"]
+        yl0, yl1 = info["ylim"]
+        if bw <= 0 or bh <= 0:
+            return None
+        fx = (sx - bx0) / bw
+        fy = (sy - by0) / bh
+        if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
+            return None
+        dx = xl0 + fx * (xl1 - xl0)
+        dy = yl1 - fy * (yl1 - yl0)  # image y grows downward, data y upward
+        return dx, dy
+
+    def _on_mocap_box_click(self, sx: int, sy: int):
+        """Two clicks on the 2D top view draw the LED box (X-Y rect; Z ± half
+        come from the box spinboxes)."""
+        if not MOCAP:
+            self.sync_info.setText("Load data first (tab 0).")
+            return
+        xy = self._mocap2d_px_to_data(sx, sy)
+        if xy is None:
+            self.sync_info.setText("Click inside the 2D plot area.")
+            return
+        self._box_draw.append(xy)
+        if len(self._box_draw) == 1:
+            self.sync_info.setText(
+                f"Box corner 1: X={xy[0]:.0f}, Y={xy[1]:.0f} mm - "
+                "click the opposite corner.")
+            return
+        (x1, y1), (x2, y2) = self._box_draw
+        self._box_draw = []
+        zc = self.box_z.value()
+        half = self.box_half.value()
+        self.state["box_lo"] = [min(x1, x2), min(y1, y2), zc - half]
+        self.state["box_hi"] = [max(x1, x2), max(y1, y2), zc + half]
+        # sync the spinboxes (block signals so they don't recompute the box)
+        for s, v in ((self.box_x, (x1 + x2) / 2), (self.box_y, (y1 + y2) / 2),
+                     (self.box_z, zc), (self.box_half, half)):
+            s.blockSignals(True)
+            s.setValue(v)
+            s.blockSignals(False)
+        self.sync_info.setText(
+            f"Box drawn: X [{min(x1, x2):.0f}, {max(x1, x2):.0f}], "
+            f"Y [{min(y1, y2):.0f}, {max(y1, y2):.0f}], "
+            f"Z {zc:.0f} +/- {half:.0f} mm -> Compute traces.")
+        self._update_mocap_views()
 
     # ==================================================================
     # Tab 2 handlers
@@ -961,6 +1023,7 @@ class MainWindow(QMainWindow):
         if not MOCAP:
             self.sync_info.setText("Load data first (tab 0).")
             return
+        self._box_draw = []
         led = auto_find_led(MOCAP)
         if led is None:
             self.sync_info.setText("No stationary blinking marker found - "
@@ -978,6 +1041,7 @@ class MainWindow(QMainWindow):
             f"{pos[2]:.0f}) mm, size +/-{half:.0f} mm")
 
     def _on_box_change(self):
+        self._box_draw = []   # switching to manual/spin control cancels drawing
         x, y, z, h = (self.box_x.value(), self.box_y.value(),
                       self.box_z.value(), self.box_half.value())
         self.state["box_lo"] = [x - h, y - h, z - h]

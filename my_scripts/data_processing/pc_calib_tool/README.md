@@ -68,9 +68,12 @@ on this machine they are auto-loaded on start.
    distance matching and reports the error.  Save when verified.
 2. **Sync** — Video: click 2 points on the video to box the flashing LED →
    *Compute traces* (intensity trace + threshold → binary).  Mocap: set the
-   3D box (or *Auto-find LED*) → presence trace.  *Auto-sync*
-   (cross-correlation proposes the offset) → fine-tune with the offset spin →
-   *Save sync*.  The synchronized scrub moves both viewers together.
+   3D box by **clicking 2 corners on the 2D top view** (X–Y rectangle; the Z
+   center and ±half come from the box spinboxes), or use *Auto-find LED* →
+   presence trace.  *Auto-sync* (cross-correlation proposes the offset) →
+   fine-tune with the offset spin → *Save sync*.  The synchronized scrub
+   moves both viewers together.  The mocap axes are locked to the whole
+   recording, so the view doesn't rescale while scrubbing.
 3. **Trim** — One shared start/end (video seconds) applied to both streams.
 4. **Calibrate** — Runs solvePnP (board pose per frame, intrinsics from the
    same video) + Umeyama fit with iterative outlier rejection → saves

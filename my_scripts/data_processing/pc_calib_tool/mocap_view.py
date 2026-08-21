@@ -131,12 +131,18 @@ def render_mocap_2d(
     box: tuple[np.ndarray, np.ndarray] | None = None,
     highlight_name: str | None = None,
     rng: tuple[np.ndarray, np.ndarray] | None = None,
-) -> np.ndarray:
+    return_transform: bool = False,
+) -> np.ndarray | tuple[np.ndarray, dict]:
     """2D projection of the markers (top / front / side) -> RGB image.
 
     The window is locked to the full-recording range (fixed_range), made
     square so the equal-aspect projection stays exact and never rescales
     between frames.  Pass ``rng`` to override.
+
+    If ``return_transform`` is True, returns ``(img, info)`` where ``info``
+    maps image-pixel coordinates to data (mm) coordinates (for click-to-draw):
+    ``info = {plane, xlim, ylim, bbox_img}`` with ``bbox_img`` = axes bbox in
+    image pixels (origin top-left).
     """
     labels = mocap["labels"]
     xyz = mocap["xyz"]
@@ -171,7 +177,23 @@ def render_mocap_2d(
     ax.set_ylabel(["Y (mm)", "Z (mm)", "Z (mm)"][["top", "front", "side"].index(plane)])
     ax.set_title(f"{plane} view - frame {frame_idx}")
     ax.set_aspect("equal", adjustable="box")
-    return fig_to_img(fig)
+
+    info = None
+    if return_transform:
+        fig.canvas.draw()
+        bb = ax.get_window_extent(fig.canvas.get_renderer())
+        w_in, h_in = fig.get_size_inches()
+        fig_px_h = int(h_in * fig.dpi)
+        # display bbox has origin bottom-left; image (buffer_rgba) has top-left
+        info = {
+            "plane": plane,
+            "xlim": (float(ax.get_xlim()[0]), float(ax.get_xlim()[1])),
+            "ylim": (float(ax.get_ylim()[0]), float(ax.get_ylim()[1])),
+            "bbox_img": (float(bb.x0), float(fig_px_h - bb.y1),
+                          float(bb.width), float(bb.height)),
+        }
+    img = fig_to_img(fig)
+    return (img, info) if return_transform else img
 
 
 def render_mocap_overview(mocap: dict, box=None) -> np.ndarray:
