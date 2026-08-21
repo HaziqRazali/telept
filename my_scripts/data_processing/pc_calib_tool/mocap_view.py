@@ -48,13 +48,50 @@ def draw_box_3d(ax, lo: np.ndarray, hi: np.ndarray, color="lime"):
     ax.add_collection3d(Line3DCollection(segs, colors=color, linewidths=2))
 
 
+def fixed_range(mocap: dict, pad_mm: float = 100.0) -> tuple[np.ndarray, np.ndarray]:
+    """Global axis range (lo, hi, each (3,)) over ALL visible markers in the
+    whole recording, padded by ``pad_mm``.
+
+    The result is cached on the mocap dict so the scrub view keeps a stable
+    scale instead of re-fitting to each frame's markers (which makes the
+    axes jump around).
+    """
+    key = "_fixed_range_mm"
+    cached = mocap.get(key)
+    if cached is not None:
+        return cached
+    xyz = mocap["xyz"]          # (N, 3, F)
+    pres = mocap["presence"]    # (N, F)
+    seen = []
+    for i in range(xyz.shape[0]):
+        m = pres[i]
+        if m.any():
+            # NB: xyz[i] is (3, F); mask the LAST axis to keep (3, n).
+            # (xyz[i, :, m] reorders axes and would give (n, 3) -- wrong.)
+            seen.append(xyz[i][:, m])
+    if seen:
+        P = np.concatenate(seen, axis=1)      # (3, M)
+        lo = P.min(axis=1) - pad_mm
+        hi = P.max(axis=1) + pad_mm
+    else:
+        lo = -np.ones(3) * 1000.0
+        hi = np.ones(3) * 1000.0
+    mocap[key] = (lo, hi)
+    return lo, hi
+
+
 def render_mocap_3d(
     mocap: dict,
     frame_idx: int,
     box: tuple[np.ndarray, np.ndarray] | None = None,
     highlight_name: str | None = None,
+    rng: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> np.ndarray:
-    """3D scatter of all tracked markers at a mocap frame -> RGB image."""
+    """3D scatter of all tracked markers at a mocap frame -> RGB image.
+
+    Axes are locked to the full-recording range (fixed_range) so the view
+    doesn't rescale between frames; pass ``rng`` to override.
+    """
     labels = mocap["labels"]
     xyz = mocap["xyz"]
     pres = mocap["presence"][:, frame_idx]
@@ -73,6 +110,11 @@ def render_mocap_3d(
     if box is not None:
         draw_box_3d(ax, box[0], box[1])
 
+    lo, hi = fixed_range(mocap) if rng is None else rng
+    ax.set_xlim(lo[0], hi[0])
+    ax.set_ylim(lo[1], hi[1])
+    ax.set_zlim(lo[2], hi[2])
+
     ax.set_xlabel("X (mm)")
     ax.set_ylabel("Y (mm)")
     ax.set_zlabel("Z (mm)")
@@ -88,8 +130,14 @@ def render_mocap_2d(
     plane: str = "top",
     box: tuple[np.ndarray, np.ndarray] | None = None,
     highlight_name: str | None = None,
+    rng: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> np.ndarray:
-    """2D projection of the markers (top / front / side) -> RGB image."""
+    """2D projection of the markers (top / front / side) -> RGB image.
+
+    The window is locked to the full-recording range (fixed_range), made
+    square so the equal-aspect projection stays exact and never rescales
+    between frames.  Pass ``rng`` to override.
+    """
     labels = mocap["labels"]
     xyz = mocap["xyz"]
     pres = mocap["presence"][:, frame_idx]
@@ -111,10 +159,18 @@ def render_mocap_2d(
         ys = [lo[b], lo[b], hi[b], hi[b], lo[b]]
         ax.plot(xs, ys, color="lime", lw=2)
 
+    # fixed, square window (equal aspect stays exact and stable)
+    glo, ghi = fixed_range(mocap) if rng is None else rng
+    half = max(ghi[a] - glo[a], ghi[b] - glo[b]) / 2
+    cx = (glo[a] + ghi[a]) / 2
+    cy = (glo[b] + ghi[b]) / 2
+    ax.set_xlim(cx - half, cx + half)
+    ax.set_ylim(cy - half, cy + half)
+
     ax.set_xlabel(["X (mm)", "X (mm)", "Y (mm)"][["top", "front", "side"].index(plane)])
     ax.set_ylabel(["Y (mm)", "Z (mm)", "Z (mm)"][["top", "front", "side"].index(plane)])
     ax.set_title(f"{plane} view - frame {frame_idx}")
-    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_aspect("equal", adjustable="box")
     return fig_to_img(fig)
 
 
