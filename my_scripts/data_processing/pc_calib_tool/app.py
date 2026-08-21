@@ -253,9 +253,15 @@ class TracesCanvas(FigureCanvas):
 
     def update_traces(self, state, times: np.ndarray, fps: float,
                       video_cursor_t: float | None = None,
-                      mocap_cursor_t: float | None = None) -> None:
+                      mocap_cursor_t: float | None = None,
+                      xlim: tuple[float, float] | None = None,
+                      ylim: tuple[float, float] = (-0.1, 2.6)) -> None:
         """Plot the traces; ``video_cursor_t``/``mocap_cursor_t`` (video s)
-        draw dashed vertical bars for the video and mocap scrub sliders."""
+        draw dashed vertical bars for the video and mocap scrub sliders.
+
+        Axes are FIXED to the passed ranges (default: full y span of all
+        traces) so moving the bars never rescales the plot.
+        """
         self.fig.clear()
         ax = self.fig.add_subplot(111)
         any_line = False
@@ -287,6 +293,9 @@ class TracesCanvas(FigureCanvas):
         ax.set_ylabel("signal")
         ax.set_title("move the video + mocap scrub sliders to line their "
                      "bars up on the pulses, then 'Set offset from bars'")
+        if xlim is not None:
+            ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
         if any_line:
             ax.legend(loc="upper right", fontsize=8)
         ax.grid(alpha=0.3)
@@ -1193,14 +1202,29 @@ class MainWindow(QMainWindow):
 
     def _refresh_traces(self):
         """Redraw the traces plot with the two scrub cursor bars (they track
-        the video + mocap scrub sliders)."""
+        the video + mocap scrub sliders).
+
+        The x-axis is FIXED to the union of both recordings' time spans
+        (video [0, dur]; mocap [offset, dur + offset]) so moving the bars
+        never rescales the plot - only the bars move.
+        """
         vt = mt = None
+        xlo, xhi = 0.0, 1.0
         if FRAME_ARR is not None and len(TIMES):
             vt = float(TIMES[self.video_scrub.value()])
+            xlo, xhi = 0.0, float(TIMES[-1])
         if MOCAP:
-            mt = self.mocap_scrub.value() / FPS_M + self.state["offset"]
+            off = float(self.state["offset"])
+            mt = self.mocap_scrub.value() / FPS_M + off
+            m_end = N_MOC / FPS_M + off
+            xlo = min(xlo, off)
+            xhi = max(xhi, m_end)
+        pad = max((xhi - xlo) * 0.02, 0.1)   # small margin so edge bars are visible
+        xlo -= pad
+        xhi += pad
         self.traces.update_traces(self.state, TIMES, FPS_M,
-                                  video_cursor_t=vt, mocap_cursor_t=mt)
+                                  video_cursor_t=vt, mocap_cursor_t=mt,
+                                  xlim=(xlo, xhi))
 
     def _on_offset_from_bars(self):
         """Set offset = (video bar time) - (mocap bar time): line the two
