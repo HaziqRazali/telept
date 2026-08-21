@@ -478,6 +478,11 @@ class MainWindow(QMainWindow):
         self._set_proj_range()
         self._update_proj_view()
 
+        # resume: auto-restore the saved sync (offset/ROI/box/threshold) so
+        # the projection uses the offset you synced in a previous session
+        if config.SYNC_FILE.exists():
+            self._on_load_sync()
+
         self.status.setText(
             f"Loaded:\n  video: {Path(video_path).name}  "
             f"({N_VID} frames, {VIDEO_DUR:.1f} s, "

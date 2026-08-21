@@ -30,13 +30,29 @@ from config import (
 # ----------------------------------------------------------------------
 # Video
 # ----------------------------------------------------------------------
+def _times_are_sane(times: np.ndarray) -> bool:
+    """True if timestamps are finite, start >= 0 and strictly increasing.
+
+    Some VFR/container files report negative or non-monotonic
+    CAP_PROP_POS_MSEC values; those would silently corrupt sync/trim, so we
+    detect them here and refuse to use the cache.
+    """
+    if times is None or len(times) == 0:
+        return False
+    if not np.all(np.isfinite(times)):
+        return False
+    if times[0] < 0:
+        return False
+    return bool(np.all(np.diff(times) > 0))
+
+
 def pre_extract_frames(
     video_path: Path = VIDEO_PATH, force: bool = False
 ) -> tuple[list[Path], np.ndarray]:
     """Extract every video frame to a JPEG cache, returning (paths, times).
 
     Times are in seconds (one per frame).  Skips extraction if the cache is
-    already complete for this video.
+    already complete and sane for this video.
     """
     video_path = Path(video_path)
     meta_path = FRAME_META_FILE
@@ -48,8 +64,10 @@ def pre_extract_frames(
         if meta.get("video") == str(video_path):
             frames = sorted(FRAME_DIR.glob("*.jpg"))
             times = np.load(times_path)
-            if len(frames) == meta["count"] == len(times):
+            if (len(frames) == meta["count"] == len(times)
+                    and _times_are_sane(times)):
                 return frames, times
+            # bad cache -> fall through and re-extract
 
     # --- extract --------------------------------------------------------
     cap = cv2.VideoCapture(str(video_path))
@@ -75,12 +93,20 @@ def pre_extract_frames(
     cap.release()
 
     times = np.asarray(times, dtype=np.float64)
+    src = "pts"
+    if not _times_are_sane(times):
+        # Container reports unreliable timestamps -> use frame index at the
+        # nominal rate so sync/trim still work.
+        fps = float(cap.get(cv2.CAP_PROP_FPS)) or 30.0
+        times = np.arange(len(times)) / fps
+        src = "synthetic"
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     meta = {
         "video": str(video_path),
         "count": len(frames),
         "resolution": [w, h],
+        "timestamps": src,
         "avg_fps": float(len(frames) / (times[-1] - times[0])) if len(frames) > 1 else None,
     }
     meta_path.write_text(json.dumps(meta, indent=2))
