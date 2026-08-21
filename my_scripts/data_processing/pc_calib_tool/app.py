@@ -696,6 +696,9 @@ class MainWindow(QMainWindow):
         self.offset_spin.setDecimals(3)
         self.offset_spin.valueChanged.connect(self._on_offset)
         ctrl.addWidget(self.offset_spin)
+        invert_btn = QPushButton("Invert offset")
+        invert_btn.clicked.connect(self._on_invert_offset)
+        ctrl.addWidget(invert_btn)
         ctrl.addWidget(QLabel("Sync scrub (video s):"))
         self.sync_scrub = QDoubleSpinBox()
         self.sync_scrub.setRange(0.0, 1.0)
@@ -1100,6 +1103,14 @@ class MainWindow(QMainWindow):
         self.state["offset"] = float(v)
         self.traces.update_traces(self.state, TIMES, FPS_M)
 
+    def _on_invert_offset(self):
+        """Flip the sign of the offset (auto-sync can pick the wrong-signed
+        twin when the blink pattern is ambiguous)."""
+        self.offset_spin.setValue(-self.offset_spin.value())
+        # re-sync both viewers at the current scrub position immediately
+        if FRAME_ARR is not None:
+            self._on_sync_scrub(self.sync_scrub.value())
+
     def _on_save_sync(self):
         if self.state["video_bin"] is None or self.state["mocap_bin"] is None:
             self.sync_info.setText("Compute both traces first.")
@@ -1114,7 +1125,9 @@ class MainWindow(QMainWindow):
         if FRAME_ARR is None:
             return
         vi = int(np.argmin(np.abs(TIMES - t_video)))
-        mi = mocap_index_for_video_time(TIMES[vi], self.state["offset"], FPS_M)
+        t_m = TIMES[vi] - self.state["offset"]          # mapped mocap time
+        mi = int(round(t_m * FPS_M))
+        clamped = mi < 0 or mi >= N_MOC
         mi = max(0, min(mi, N_MOC - 1))
         self.video_scrub.blockSignals(True)
         self.video_scrub.setValue(vi)
@@ -1124,6 +1137,16 @@ class MainWindow(QMainWindow):
         self.mocap_scrub.blockSignals(False)
         self._update_video_views()
         self._update_mocap_views()
+        if clamped:
+            # show why the mocap view sat at an edge instead of moving
+            self.mocap_frame_info.setText(
+                f"frame {mi}/{max(N_MOC - 1, 0)}  t={t_m:.3f}s   "
+                f"[video {TIMES[vi]:.2f}s -> mocap {t_m:.2f}s is OUT OF "
+                f"RANGE, clamped to {mi}]")
+        else:
+            self.mocap_frame_info.setText(
+                f"frame {mi}/{max(N_MOC - 1, 0)}  t={t_m:.3f}s "
+                f"(video {TIMES[vi]:.2f}s)")
 
     # ==================================================================
     # Tab 3 handlers
