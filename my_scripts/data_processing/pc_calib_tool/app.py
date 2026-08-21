@@ -483,12 +483,6 @@ class MainWindow(QMainWindow):
             f"({N_MOC} frames @ {FPS_M:.0f} Hz)\n\n"
             "Proceed to tabs 1-4.  For frame-exact video scrubbing: click the\n"
             "video scrub slider, then use arrow keys (PageUp/Down = ±10).")
-        if N_MOC / FPS_M < VIDEO_DUR:
-            self.status.append(
-                f"\nNOTE: mocap ({N_MOC / FPS_M:.1f} s @ {FPS_M:.0f} Hz) is "
-                f"SHORTER than video ({VIDEO_DUR:.1f} s) - with mocap started "
-                f"first it should be longer. The C3D rate is probably too high; "
-                f"set 'Mocap FPS override' in the Data tab and reload.")
 
     @staticmethod
     def _preload_frames(frames: list) -> np.ndarray:

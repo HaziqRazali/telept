@@ -64,7 +64,7 @@ on this machine they are auto-loaded on start.
    from `config.py` / `output/settings.json`), click *Load data*.  If the
    C3D's stored rate is wrong (e.g. mocap comes out SHORTER than the video
    even though it was started first), set **Mocap FPS override** here and
-   reload — a note appears when the durations look inconsistent.
+   reload.
 1. **Marker layout** — Click the 6 orange dots on the board schematic where
    the reflective markers sit (grid = 40 mm).  Click order is arbitrary; the
    tool auto-matches your clicks to the C3D `Board1..Board6` labels by rigid
