@@ -77,6 +77,37 @@ from sync import (
 )
 from trim import apply_trim, save_trim
 
+
+# ----------------------------------------------------------------------
+# Qt <-> OpenCV plugin-path fix
+# ----------------------------------------------------------------------
+# opencv-python bundles its own Qt build and, at import time, sets
+# QT_QPA_PLATFORM_PLUGIN_PATH to cv2/qt/plugins.  That Qt build differs from
+# PyQt5's, so PyQt5 then fails to load the "xcb" platform plugin and the app
+# aborts with "Could not load the Qt platform plugin 'xcb' ... in cv2/qt/plugins".
+# Fix: point Qt back at PyQt5's own plugins directory, and strip any cv2
+# plugin dirs from QApplication's library paths.
+def _fix_qt_plugin_path() -> None:
+    import os
+    try:
+        from PyQt5.QtCore import QLibraryInfo
+        plugins = QLibraryInfo.location(QLibraryInfo.PluginsPath)
+    except Exception:
+        plugins = ""
+    if plugins and os.path.isdir(plugins):
+        os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = plugins
+        os.environ["QT_PLUGIN_PATH"] = plugins
+
+
+_fix_qt_plugin_path()  # after cv2 (and friends) imported, before QApplication
+
+
+def _strip_cv2_plugin_paths(app: "QApplication") -> None:
+    """Remove opencv-bundled Qt plugin dirs from the app's library search path."""
+    for p in list(app.libraryPaths()):
+        if "cv2" in p:
+            app.removeLibraryPath(p)
+
 # ----------------------------------------------------------------------
 # Data globals -- filled by load_data() (from the "0. Data" tab, or at app
 # start if the configured / last-saved paths exist on this machine).
@@ -996,7 +1027,9 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    _fix_qt_plugin_path()
     app = QApplication(sys.argv)
+    _strip_cv2_plugin_paths(app)
     app.setApplicationName("pc_calib_tool")
     win = MainWindow()
     win.show()
