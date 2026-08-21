@@ -10,9 +10,9 @@ mm) plus the camera intrinsics.
 
 This is the **native desktop** sibling of `../web_calib_tool/`.  It has the
 exact same 5-stage workflow and writes the same `output/*.json` files, but it
-runs as a local **PyQt5 window instead of a Gradio web app** — there is no
-browser and no server round-trip, so **video scrubbing is instant** (frames are
-preloaded into RAM and blitted straight to the widget).
+runs as a local **PySide6 (Qt6) window instead of a Gradio web app** — there
+is no browser and no server round-trip, so **video scrubbing is instant**
+(frames are preloaded into RAM and blitted straight to the widget).
 
 ## Why a PC version?
 
@@ -27,17 +27,27 @@ everything in-process on the machine with the monitor:
 
 ## Requirements
 
-Python 3.10+, `PyQt5`, `opencv-python`, `ezc3d`, `numpy`, `scipy`,
-`matplotlib`.  (No `gradio` needed.)
+Python 3.10+ and a dedicated virtualenv.  The stack is:
+
+* **PySide6** — the maintained Qt6 binding (Qt 5 / PyQt5 are EOL); renders
+  in-process for 0-delay scrubbing
+* **opencv-python-headless** — OpenCV without its bundled Qt.  Do **not** use
+  the regular `opencv-python` here: it sets `QT_QPA_PLATFORM_PLUGIN_PATH` to
+  its own `cv2/qt/plugins`, which makes PySide6 abort with
+  `Could not load the Qt platform plugin "xcb"`.
+* `numpy`, `scipy`, `matplotlib`, `ezc3d`
+
+Set it up once (this already exists as `.venv/` on this machine):
 
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
 ## Run
 
 ```bash
-python3 app.py
+.venv/bin/python app.py          # or:  source .venv/bin/activate && python app.py
 ```
 
 A window opens (must be on a machine with a display).  Set the iPad video +

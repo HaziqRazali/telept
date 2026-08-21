@@ -1,6 +1,7 @@
-"""Native desktop (PyQt5) UI for the iPad <-> Mocap calibration tool.
+"""Native desktop (PySide6) UI for the iPad <-> Mocap calibration tool.
 
-Run:  python3 app.py        (needs a display; no browser, no Gradio)
+Run:  .venv/bin/python app.py   (or:  python3 app.py  with a venv active;
+      needs a display; no browser, no Gradio)
 
 Why a native UI?
   The Gradio web version round-trips every scrub through the server + browser,
@@ -36,9 +37,9 @@ import numpy as np
 # do NOT call matplotlib.use() here.  The embedded traces plot uses explicit
 # Figure() objects + FigureCanvasQTAgg, which render via Qt directly and work
 # fine alongside Agg for the off-screen mocap renders.
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import (
     QApplication,
     QDoubleSpinBox,
     QFileDialog,
@@ -58,7 +59,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 import config
@@ -79,21 +80,32 @@ from trim import apply_trim, save_trim
 
 
 # ----------------------------------------------------------------------
-# Qt <-> OpenCV plugin-path fix
+# Qt <-> OpenCV plugin-path fix (defensive; only matters with a GUI build of
+# opencv-python installed).
 # ----------------------------------------------------------------------
-# opencv-python bundles its own Qt build and, at import time, sets
-# QT_QPA_PLATFORM_PLUGIN_PATH to cv2/qt/plugins.  That Qt build differs from
-# PyQt5's, so PyQt5 then fails to load the "xcb" platform plugin and the app
-# aborts with "Could not load the Qt platform plugin 'xcb' ... in cv2/qt/plugins".
-# Fix: point Qt back at PyQt5's own plugins directory, and strip any cv2
-# plugin dirs from QApplication's library paths.
+# opencv-python (NOT headless) bundles its own Qt build and, at import time,
+# sets QT_QPA_PLATFORM_PLUGIN_PATH to cv2/qt/plugins.  That Qt build differs
+# from PySide6's, so Qt then fails to load the "xcb" platform plugin and the
+# app aborts with "Could not load the Qt platform plugin 'xcb' ... in
+# cv2/qt/plugins".  With opencv-python-headless (recommended, see
+# requirements.txt) this is a harmless no-op.
+# Fix: point Qt back at the binding's own plugins directory, and strip any
+# cv2 plugin dirs from QApplication's library paths.
 def _fix_qt_plugin_path() -> None:
     import os
+    plugins = ""
     try:
-        from PyQt5.QtCore import QLibraryInfo
-        plugins = QLibraryInfo.location(QLibraryInfo.PluginsPath)
+        from PySide6.QtCore import QLibraryInfo
+        try:  # Qt6 API
+            plugins = QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
+        except Exception:  # older Qt5-style API
+            plugins = QLibraryInfo.location(QLibraryInfo.PluginsPath)
     except Exception:
-        plugins = ""
+        try:  # fall back to PyQt5 if someone runs this with PyQt5 installed
+            from PyQt5.QtCore import QLibraryInfo
+            plugins = QLibraryInfo.location(QLibraryInfo.PluginsPath)
+        except Exception:
+            pass
     if plugins and os.path.isdir(plugins):
         os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = plugins
         os.environ["QT_PLUGIN_PATH"] = plugins
@@ -149,7 +161,7 @@ class ClickableLabel(QLabel):
     the scale, so mousePressEvent emits the corresponding source pixel.
     """
 
-    clicked = pyqtSignal(int, int)  # (x, y) in source-image pixels
+    clicked = Signal(int, int)  # (x, y) in source-image pixels
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1033,7 +1045,7 @@ def main():
     app.setApplicationName("pc_calib_tool")
     win = MainWindow()
     win.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
