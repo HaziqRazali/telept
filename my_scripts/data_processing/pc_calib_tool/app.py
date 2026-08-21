@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QSlider,
     QSizePolicy,
     QSpinBox,
@@ -886,6 +887,11 @@ class MainWindow(QMainWindow):
         prev = QPushButton("3) Preview transform on video (sanity check)")
         prev.clicked.connect(self._on_preview_verify)
         lay.addWidget(prev)
+        self.cal_progress = QProgressBar()
+        self.cal_progress.setRange(0, 1)
+        self.cal_progress.setValue(0)
+        self.cal_progress.setFormat("%v/%m")
+        lay.addWidget(self.cal_progress)
         prow = QHBoxLayout()
         self.cal_previews = []
         for _ in range(3):
@@ -1407,15 +1413,28 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # Tab 4 handler
     # ==================================================================
+    def _cal_progress(self, done: int, total: int, msg: str = "") -> None:
+        """Progress callback for the long calibration loops."""
+        if total > 0:
+            self.cal_progress.setRange(0, total)
+            self.cal_progress.setValue(int(done))
+        if msg:
+            self.cal_out.setText(msg)
+        QApplication.processEvents()
+
     def _on_calibrate_intrinsics(self):
         """Stage A: self-calibrate the camera matrix from the chessboard video."""
         if FRAME_ARR is None:
             self.cal_out.setText("Load data first (tab 0).")
             return
         try:
+            self.cal_progress.setRange(0, 1)
+            self.cal_progress.setValue(0)
             self.cal_out.setText("Detecting chessboard and calibrating "
                                  "intrinsics - this may take a minute...")
-            r = calibrate_intrinsics(video_path=CURRENT_VIDEO_PATH)
+            r = calibrate_intrinsics(video_path=CURRENT_VIDEO_PATH,
+                                     progress_cb=self._cal_progress)
+            self.cal_progress.setValue(self.cal_progress.maximum())
             lines = [
                 f"Intrinsics from {r['n_detected_frames']}/"
                 f"{r['n_total_frames']} chessboard frames",
@@ -1564,11 +1583,14 @@ class MainWindow(QMainWindow):
 
     def _on_calibrate(self):
         # Stage A prerequisite: intrinsics must exist (self-calibrate if not)
+        self.cal_progress.setRange(0, 1)
+        self.cal_progress.setValue(0)
         if not config.INTRINSICS_FILE.exists():
             self.cal_out.setText("output/intrinsics.json missing - "
                                  "calibrating from the chessboard video first...")
             try:
-                calibrate_intrinsics(video_path=CURRENT_VIDEO_PATH)
+                calibrate_intrinsics(video_path=CURRENT_VIDEO_PATH,
+                                     progress_cb=self._cal_progress)
             except Exception as e:
                 self.cal_out.setText(f"ERROR calibrating intrinsics: {e}")
                 return
@@ -1589,7 +1611,9 @@ class MainWindow(QMainWindow):
             return
         try:
             r = run_calibration(video_path=CURRENT_VIDEO_PATH,
-                                c3d_path=CURRENT_C3D_PATH)
+                                c3d_path=CURRENT_C3D_PATH,
+                                progress_cb=self._cal_progress)
+            self.cal_progress.setValue(self.cal_progress.maximum())
             lines = [
                 f"Used {r['n_frames_used']} frames, "
                 f"{r['n_correspondences']} marker correspondences",

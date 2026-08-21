@@ -57,9 +57,11 @@ def detect_boards_all_frames(video_path=VIDEO_PATH, gray_frames=None) -> list:
     return results
 
 
-def calibrate_intrinsics(video_path=VIDEO_PATH, verbose: bool = True) -> dict:
+def calibrate_intrinsics(video_path=VIDEO_PATH, verbose: bool = True,
+                         progress_cb=None) -> dict:
     """Self-calibrate camera intrinsics from all chessboard detections.
 
+    progress_cb(done, total, msg): optional callback during the frame scan.
     Returns a result dict and writes output/intrinsics.json.
     """
     frames, _ = pre_extract_frames(video_path)
@@ -70,7 +72,10 @@ def calibrate_intrinsics(video_path=VIDEO_PATH, verbose: bool = True) -> dict:
     obj_points, img_points = [], []
     good_frames = []
 
+    n = len(frames)
     for i, fp in enumerate(frames):
+        if progress_cb is not None and (i % 25 == 0 or i == n - 1):
+            progress_cb(i + 1, n, f"Detecting chessboard {i + 1}/{n}...")
         img = cv2.imread(str(fp))
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         ok, corners = detect_board(gray)

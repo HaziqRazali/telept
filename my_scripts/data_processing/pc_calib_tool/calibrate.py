@@ -88,8 +88,12 @@ def build_good_pairs(
     trim: dict,
     intrinsics: dict,
     verbose: bool = True,
+    progress_cb=None,
 ) -> list[dict]:
-    """Collect (video_idx, corners, mocap_idx) for usable frames."""
+    """Collect (video_idx, corners, mocap_idx) for usable frames.
+
+    progress_cb(done, total, msg): optional callback during the frame scan.
+    """
     K = np.array(intrinsics["camera_matrix"])
     dist = np.array(intrinsics["dist_coeffs"])
 
@@ -101,7 +105,10 @@ def build_good_pairs(
     v1 = trim["video_last"]
     pairs = []
     n_board = 0
-    for vi in range(v0, v1 + 1):
+    total = v1 - v0 + 1
+    for k, vi in enumerate(range(v0, v1 + 1)):
+        if progress_cb is not None and (k % 25 == 0 or k == total - 1):
+            progress_cb(k + 1, total, f"Scanning video frame {vi}...")
         img = cv2.imread(str(__import__("data_loader").FRAME_DIR / f"{vi:06d}.jpg"))
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         ok, corners = detect_board(gray)
@@ -130,13 +137,17 @@ def compute_transform(
     markers_mm: np.ndarray,
     verbose: bool = True,
     outlier_mm: float = 30.0,
+    progress_cb=None,
 ) -> dict:
     """Fit the mocap->camera rigid transform with iterative outlier rejection.
 
     Outlier frames (corner-order flips, bad detections) are removed in a
     robust loop so they don't poison the fit; they are reported.
+
+    progress_cb(done, total, msg): optional callback during the frame scan.
     """
-    pairs = build_good_pairs(mocap, video_times, offset, trim, intrinsics, verbose)
+    pairs = build_good_pairs(mocap, video_times, offset, trim, intrinsics,
+                             verbose, progress_cb=progress_cb)
     if len(pairs) < 3:
         raise RuntimeError(f"Only {len(pairs)} usable frames - need >= 3")
 
@@ -219,9 +230,13 @@ def compute_transform(
 
 
 def run_calibration(
-    video_path=VIDEO_PATH, c3d_path=C3D_PATH, verbose: bool = True
+    video_path=VIDEO_PATH, c3d_path=C3D_PATH, verbose: bool = True,
+    progress_cb=None,
 ) -> dict:
-    """Full Stage E from saved files (intrinsics, markers, trim, sync)."""
+    """Full Stage E from saved files (intrinsics, markers, trim, sync).
+
+    progress_cb(done, total, msg): optional callback during the frame scan.
+    """
     intrinsics = load_intrinsics()
     markers_mm = load_markers_mm()
     trim = json.loads(TRIM_FILE.read_text())
@@ -233,4 +248,4 @@ def run_calibration(
     from trim import apply_trim
     trim_full = apply_trim(video_times, mocap, offset, trim["start_s"], trim["end_s"])
     return compute_transform(mocap, video_times, offset, trim_full, intrinsics,
-                             markers_mm, verbose)
+                             markers_mm, verbose, progress_cb=progress_cb)
