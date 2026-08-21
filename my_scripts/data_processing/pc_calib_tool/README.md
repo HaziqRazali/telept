@@ -61,11 +61,17 @@ on this machine they are auto-loaded on start.
 ## Workflow (5 tabs, in order)
 
 0. **Data** — Set the paths to your iPad video and C3D mocap file (pre-filled
-   from `config.py` / `output/settings.json`), click *Load data*.
+   from `config.py` / `output/settings.json`), click *Load data*.  If the
+   C3D's stored rate is wrong (e.g. mocap comes out SHORTER than the video
+   even though it was started first), set **Mocap FPS override** here and
+   reload — a note appears when the durations look inconsistent.
 1. **Marker layout** — Click the 6 orange dots on the board schematic where
    the reflective markers sit (grid = 40 mm).  Click order is arbitrary; the
    tool auto-matches your clicks to the C3D `Board1..Board6` labels by rigid
-   distance matching and reports the error.  Save when verified.
+   distance matching and reports the error.  **Save markers** writes one
+   `output/markers.json` with the layout AND the board geometry; **Load
+   markers** restores both from that same file (the board config is applied
+   at runtime).  Save when verified.
 2. **Sync** — Video: click 2 points on the video to box the flashing LED →
    *Compute traces* (intensity trace + threshold → binary).  Mocap: set the
    3D box by **clicking 2 corners on the 2D top view** (X–Y rectangle; the Z

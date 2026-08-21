@@ -65,7 +65,7 @@ SETTINGS_FILE = OUTPUT_DIR / "settings.json"
 
 
 def load_settings() -> dict:
-    """Return saved {video_path, c3d_path} from output/settings.json (or {})."""
+    """Return saved {video_path, c3d_path, mocap_fps_override} (or {})."""
     if SETTINGS_FILE.exists():
         try:
             return json.loads(SETTINGS_FILE.read_text())
@@ -74,7 +74,10 @@ def load_settings() -> dict:
     return {}
 
 
-def save_settings(video_path, c3d_path) -> None:
-    """Persist the video/c3d paths used by the GUI."""
-    SETTINGS_FILE.write_text(json.dumps(
-        {"video_path": str(video_path), "c3d_path": str(c3d_path)}, indent=2))
+def save_settings(video_path, c3d_path, mocap_fps_override=None) -> None:
+    """Persist the video/c3d paths (and optional fps override) used by the GUI."""
+    SETTINGS_FILE.write_text(json.dumps({
+        "video_path": str(video_path),
+        "c3d_path": str(c3d_path),
+        "mocap_fps_override": mocap_fps_override if mocap_fps_override else None,
+    }, indent=2))

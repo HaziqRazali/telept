@@ -382,6 +382,18 @@ class MainWindow(QMainWindow):
         c3d_row.addWidget(b2)
         form.addRow("iPad video (.mp4)", vid_row)
         form.addRow("Mocap C3D (.c3d)", c3d_row)
+        self.fps_spin = QDoubleSpinBox()
+        self.fps_spin.setRange(0.0, 1000.0)
+        self.fps_spin.setDecimals(1)
+        self.fps_spin.setSingleStep(1.0)
+        self.fps_spin.setValue(
+            float(config.load_settings().get("mocap_fps_override", 0.0) or 0.0))
+        self.fps_spin.setToolTip(
+            "True capture rate of the C3D if the rate stored in the file is "
+            "wrong (0 = use the file's rate). If mocap should be LONGER than "
+            "the video but isn't, the file rate is too high - lower it here "
+            "and reload.")
+        form.addRow("Mocap FPS override (0 = from C3D)", self.fps_spin)
         lay.addLayout(form)
 
         load_btn = QPushButton("Load data")
@@ -419,11 +431,16 @@ class MainWindow(QMainWindow):
         FRAMES, TIMES, MOCAP = frames, times, mocap
         N_VID = len(FRAMES)
         N_MOC = MOCAP["n_frames"]
+        fps_override = self.fps_spin.value()
+        if fps_override and fps_override > 0:
+            MOCAP["fps"] = float(fps_override)
         FPS_M = MOCAP["fps"]
         VIDEO_DUR = float(TIMES[-1])
         CURRENT_VIDEO_PATH = video_path
         CURRENT_C3D_PATH = c3d_path
-        config.save_settings(video_path, c3d_path)
+        config.save_settings(
+            video_path, c3d_path,
+            mocap_fps_override=(fps_override if fps_override else None))
 
         self.status.setText("Preloading frames into RAM…")
         FRAME_ARR = self._preload_frames(FRAMES)
@@ -466,6 +483,12 @@ class MainWindow(QMainWindow):
             f"({N_MOC} frames @ {FPS_M:.0f} Hz)\n\n"
             "Proceed to tabs 1-4.  For frame-exact video scrubbing: click the\n"
             "video scrub slider, then use arrow keys (PageUp/Down = ±10).")
+        if N_MOC / FPS_M < VIDEO_DUR:
+            self.status.append(
+                f"\nNOTE: mocap ({N_MOC / FPS_M:.1f} s @ {FPS_M:.0f} Hz) is "
+                f"SHORTER than video ({VIDEO_DUR:.1f} s) - with mocap started "
+                f"first it should be longer. The C3D rate is probably too high; "
+                f"set 'Mocap FPS override' in the Data tab and reload.")
 
     @staticmethod
     def _preload_frames(frames: list) -> np.ndarray:
@@ -504,6 +527,9 @@ class MainWindow(QMainWindow):
         save.clicked.connect(self._on_ml_save)
         grid.addWidget(undo, 0, 0); grid.addWidget(clear, 0, 1)
         grid.addWidget(verify, 1, 0); grid.addWidget(save, 1, 1)
+        loadm = QPushButton("Load markers (layout + board config)")
+        loadm.clicked.connect(self._on_ml_load)
+        grid.addWidget(loadm, 2, 0, 1, 2)
         right.addLayout(grid)
         self.ml_result = QTextEdit()
         self.ml_result.setReadOnly(True)
@@ -576,6 +602,51 @@ class MainWindow(QMainWindow):
             "Saved output/markers.json" +
             (f" (labels: {', '.join(v['assigned'])})" if v.get("ok")
              else " (unverified order)"))
+
+    def _apply_board_config(self, inner_corners, square_mm, margin):
+        """Override the chessboard geometry at runtime (from a loaded file).
+
+        The geometry modules imported these values at import time, so we
+        propagate the new values into their namespaces too.
+        """
+        import intrinsics as _intr
+        config.BOARD_INNER_CORNERS = tuple(int(v) for v in inner_corners)
+        config.SQUARE_SIZE_MM = float(square_mm)
+        config.BOARD_MARGIN_SQUARES = int(margin)
+        for _mod in (ml, _intr):
+            _mod.BOARD_INNER_CORNERS = config.BOARD_INNER_CORNERS
+            _mod.SQUARE_SIZE_MM = config.SQUARE_SIZE_MM
+        ml.BOARD_MARGIN_SQUARES = config.BOARD_MARGIN_SQUARES
+
+    def _on_ml_load(self):
+        """Load a saved marker layout + board config from one JSON file."""
+        fn, _ = QFileDialog.getOpenFileName(
+            self, "Load marker layout", str(config.MARKERS_FILE),
+            "Marker layout (*.json)")
+        if fn:
+            self._load_markers_file(fn)
+
+    def _load_markers_file(self, fn: str):
+        try:
+            data = json.loads(Path(fn).read_text())
+        except Exception as e:
+            self.ml_result.setText(f"ERROR reading {fn}: {e}")
+            return
+        bc = data.get("board_inner_corners")
+        sq = data.get("square_size_mm")
+        mg = data.get("margin_squares")
+        if bc and sq and mg:
+            self._apply_board_config(bc, sq, mg)
+        placed = [[float(m["x_mm"]), float(m["y_mm"])]
+                  for m in data.get("markers", [])]
+        self.state["placed"] = placed
+        self._render_canvas()
+        names = ", ".join(m.get("name", "?") for m in data.get("markers", []))
+        self.ml_result.setText(
+            f"Loaded {len(placed)} markers from {Path(fn).name}\n"
+            f"board: {bc[0]}x{bc[1]} squares, {sq:.0f} mm, "
+            f"{mg} margin squares\nsaved labels: {names}\n"
+            "Click 'Verify vs C3D' to confirm.")
 
     # ---- Tab 2: sync --------------------------------------------------
     def _build_tab2(self) -> QWidget:
