@@ -320,8 +320,7 @@ class MainWindow(QMainWindow):
         self._crop_oy = 0
         self._mocap2d_map = None    # pixel->mm map of the last 2D mocap render
         self._box_draw = []         # clicked corners (X, Y mm) while box-drawing
-        self._disp_vi = None        # sync-scrub display override (None = follow slider)
-        self._disp_mi = None
+        self._sync_last = 0         # last sync-jog slider value (centi-seconds)
 
         self._build_ui()
 
@@ -426,7 +425,6 @@ class MainWindow(QMainWindow):
         self.video_scrub.setValue(0)
         self.mocap_scrub.setRange(0, max(N_MOC - 1, 0))
         self.mocap_scrub.setValue(0)
-        self.sync_scrub.setRange(0, max(N_VID - 1, 0))
         self.sync_scrub.setValue(0)
         self.trim_start.setRange(0.0, max(VIDEO_DUR, 0.01))
         self.trim_end.setRange(0.0, max(VIDEO_DUR, 0.01))
@@ -443,8 +441,8 @@ class MainWindow(QMainWindow):
         self.state.pop("zoom_focus", None)
         self._box_draw = []
         self._mocap2d_map = None
-        self._disp_vi = None
-        self._disp_mi = None
+        self._sync_last = 0
+        self.sync_scrub_label.setText("0.00s")
 
         self._render_canvas()
         self._update_video_views()
@@ -722,16 +720,23 @@ class MainWindow(QMainWindow):
         bars_btn = QPushButton("Set offset from bars")
         bars_btn.clicked.connect(self._on_offset_from_bars)
         ctrl.addWidget(bars_btn)
-        ctrl.addWidget(QLabel("Sync scrub:"))
-        self.sync_scrub = QSlider(Qt.Horizontal)
-        self.sync_scrub.setRange(0, 0)
-        self.sync_scrub.valueChanged.connect(self._on_sync_scrub)
-        ctrl.addWidget(self.sync_scrub, 1)
-        self.sync_scrub_label = QLabel("0.00s")
-        self.sync_scrub_label.setMinimumWidth(52)
-        self.sync_scrub_label.setAlignment(Qt.AlignCenter)
-        ctrl.addWidget(self.sync_scrub_label)
         root.addLayout(ctrl)
+
+        jog = QHBoxLayout()
+        jog.addWidget(QLabel("Sync scrub (jog both, s):"))
+        self.sync_scrub = QSlider(Qt.Horizontal)
+        self.sync_scrub.setRange(-6000, 6000)   # centi-seconds; 0 = center
+        self.sync_scrub.setValue(0)
+        self.sync_scrub.setSingleStep(5)        # 0.05 s
+        self.sync_scrub.setPageStep(100)        # 1 s
+        self.sync_scrub.valueChanged.connect(self._on_sync_scrub)
+        self.sync_scrub.sliderReleased.connect(self._sync_scrub_release)
+        jog.addWidget(self.sync_scrub, 1)
+        self.sync_scrub_label = QLabel("0.00s")
+        self.sync_scrub_label.setMinimumWidth(64)
+        self.sync_scrub_label.setAlignment(Qt.AlignCenter)
+        jog.addWidget(self.sync_scrub_label)
+        root.addLayout(jog)
 
         self.sync_info = QLabel("Compute both traces first.")
         self.sync_info.setWordWrap(True)
@@ -873,8 +878,7 @@ class MainWindow(QMainWindow):
     def _update_video_views(self):
         if FRAME_ARR is None:
             return
-        idx = (self._disp_vi if self._disp_vi is not None
-               else self.video_scrub.value())
+        idx = self.video_scrub.value()
         bgr, ox, oy = self._render_video_bgr(idx)
         self._crop_ox, self._crop_oy = ox, oy
         src_h, src_w = bgr.shape[:2]
@@ -891,8 +895,7 @@ class MainWindow(QMainWindow):
     def _update_mocap_views(self):
         if not MOCAP:
             return
-        midx = (self._disp_mi if self._disp_mi is not None
-                else self.mocap_scrub.value())
+        midx = self.mocap_scrub.value()
         box = self._box_arrays()
         self.mocap3d_view.setArray(render_mocap_3d(MOCAP, midx, box))
         img2, info = render_mocap_2d(MOCAP, midx, "top", box,
@@ -1167,9 +1170,6 @@ class MainWindow(QMainWindow):
         """Flip the sign of the offset (useful when the pulses align on the
         opposite side of the shared axis)."""
         self.offset_spin.setValue(-self.offset_spin.value())
-        # re-sync both viewers at the current scrub position immediately
-        if FRAME_ARR is not None:
-            self._on_sync_scrub(self.sync_scrub.value())
 
     def _on_save_sync(self):
         if self.state["video_bin"] is None or self.state["mocap_bin"] is None:
@@ -1182,22 +1182,18 @@ class MainWindow(QMainWindow):
             f"Saved output/sync.json  offset={self.state['offset']:.3f} s")
 
     def _on_video_scrub_change(self, _v: int):
-        """Video scrub slider moved: take over from any sync-scrub display
-        override and move the video bar on the plot."""
-        self._disp_vi = None
+        """Video scrub slider moved: update its view + bar."""
         self._update_video_views()
         self._refresh_traces()
 
     def _on_mocap_scrub_change(self, _v: int):
-        """Mocap scrub slider moved: take over from any sync-scrub display
-        override and move the mocap bar on the plot."""
-        self._disp_mi = None
+        """Mocap scrub slider moved: update its view + bar."""
         self._update_mocap_views()
         self._refresh_traces()
 
     def _refresh_traces(self):
         """Redraw the traces plot with the two scrub cursor bars (they track
-        the video + mocap scrub sliders, NOT the sync scrub)."""
+        the video + mocap scrub sliders)."""
         vt = mt = None
         if FRAME_ARR is not None and len(TIMES):
             vt = float(TIMES[self.video_scrub.value()])
@@ -1220,33 +1216,44 @@ class MainWindow(QMainWindow):
             f"{tv - tm:.3f} s. The mocap (purple) bar should now sit on the "
             f"video (blue) bar - use the sync scrub to verify.")
 
-    def _on_sync_scrub(self, frame: int):
-        """Drag the sync scrub: move BOTH viewers in sync (via the offset)
-        WITHOUT moving the video/mocap scrub sliders - those hold your manual
-        alignment reference and their bars stay put."""
-        if FRAME_ARR is None or not len(TIMES):
+    def _on_sync_scrub(self, v: int):
+        """Jog BOTH scrub sliders by the sync-slider delta (centi-seconds).
+
+        The slider is center-zero (0 = no shift): dragging right moves both
+        forward, left moves both backward.  Movement is blocked when either
+        slider would leave its recording (end-frame clamp).  On release the
+        jog recentres (see _sync_scrub_release).
+        """
+        if FRAME_ARR is None or not MOCAP:
             return
-        vi = max(0, min(int(frame), N_VID - 1))
-        t_video = float(TIMES[vi])
-        self.sync_scrub_label.setText(f"{t_video:.2f}s")
-        t_m = t_video - self.state["offset"]          # mapped mocap time
-        mi = int(round(t_m * FPS_M))
-        clamped = mi < 0 or mi >= N_MOC
-        mi = max(0, min(mi, N_MOC - 1))
-        self._disp_vi = vi
-        self._disp_mi = mi
-        self._update_video_views()
-        self._update_mocap_views()
-        if clamped:
-            # show why the mocap view sat at an edge instead of moving
-            self.mocap_frame_info.setText(
-                f"frame {mi}/{max(N_MOC - 1, 0)}  t={t_m:.3f}s   "
-                f"[video {t_video:.2f}s -> mocap {t_m:.2f}s is OUT OF "
-                f"RANGE, clamped to {mi}]")
-        else:
-            self.mocap_frame_info.setText(
-                f"frame {mi}/{max(N_MOC - 1, 0)}  t={t_m:.3f}s "
-                f"(video {t_video:.2f}s)")
+        delta = (v - self._sync_last) / 100.0        # seconds
+        self._sync_last = v
+        self.sync_scrub_label.setText(f"{v / 100.0:+.2f}s")
+        if delta == 0.0:
+            return
+        tv = float(TIMES[self.video_scrub.value()]) + delta
+        tm = self.mocap_scrub.value() / FPS_M + delta
+        if tv < 0.0 or tv > TIMES[-1] or tm < 0.0 or tm > N_MOC / FPS_M:
+            # either would leave its recording -> don't move either
+            self.sync_info.setText(
+                f"Sync jog {delta:+.2f}s blocked: video would reach "
+                f"{tv:.2f}s / mocap {tm:.2f}s (out of range).")
+            return
+        vi = int(np.argmin(np.abs(TIMES - tv)))
+        mi = int(round(tm * FPS_M))
+        self.video_scrub.setValue(vi)    # -> _on_video_scrub_change (view+bar)
+        self.mocap_scrub.setValue(mi)    # -> _on_mocap_scrub_change (view+bar)
+        self.sync_info.setText(
+            f"Sync jog {delta:+.2f}s -> video {tv:.2f}s, mocap {tm:.2f}s")
+
+    def _sync_scrub_release(self):
+        """Recentre the jog slider after a drag so the next drag can go in
+        either direction (blocked so it doesn't re-apply the delta)."""
+        self.sync_scrub.blockSignals(True)
+        self.sync_scrub.setValue(0)
+        self.sync_scrub.blockSignals(False)
+        self._sync_last = 0
+        self.sync_scrub_label.setText("0.00s")
 
     # ==================================================================
     # Tab 3 handlers

@@ -78,9 +78,10 @@ on this machine they are auto-loaded on start.
      sits on the corresponding blink.
    * click **Set offset from bars** → `offset = video_bar − mocap_bar` and
      the purple bar lands on the blue bar (the sync is locked).
-   * the **sync scrub** scrubs **both** views together (via the offset) to
-     visually verify correctness — it deliberately does **not** move the two
-     alignment sliders.
+   * the **sync scrub** is a **center-zero jog slider** (0 in the middle):
+     drag right moves **both** scrub sliders forward, drag left moves both
+     backward, by the same time delta (it recentres on release). It stops
+     when either slider reaches the end frame of its recording.
    * nudge **Offset fine-tune** (or *Invert/Reset offset*) to perfect it,
      then *Save sync*.  The mocap axes are locked to the whole recording.
 3. **Trim** — One shared start/end (video seconds) applied to both streams.
