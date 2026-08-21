@@ -194,8 +194,18 @@ class ClickableLabel(QLabel):
         self.setPixmap(_rgb_to_pixmap(rgb))
 
     def mousePressEvent(self, ev) -> None:
-        x = int(ev.pos().x() * self._sx)
-        y = int(ev.pos().y() * self._sy)
+        pix = self.pixmap()
+        if pix is None or pix.isNull():
+            return
+        # The pixmap is drawn CENTERED in the widget (Qt.AlignCenter), so
+        # widget coords only equal pixmap coords when the label happens to be
+        # exactly the pixmap size.  Map the click to pixmap coords first
+        # (handles both a bigger widget -> margins and a smaller widget ->
+        # clipping), then to source-image pixels via _sx/_sy.
+        ox = (self.width() - pix.width()) // 2
+        oy = (self.height() - pix.height()) // 2
+        x = int((ev.pos().x() - ox) * self._sx)
+        y = int((ev.pos().y() - oy) * self._sy)
         self.clicked.emit(x, y)
 
 
@@ -265,6 +275,10 @@ class MainWindow(QMainWindow):
         self._crop_oy = 0
 
         self._build_ui()
+
+        # show the board schematic immediately (markers can be placed before
+        # data is loaded; only Verify/Save need the C3D)
+        self._render_canvas()
 
         # pre-fill saved / default paths, then auto-load if they exist here
         saved = config.load_settings()
@@ -449,9 +463,6 @@ class MainWindow(QMainWindow):
         self.ml_info.setText(msg)
 
     def _on_canvas_click(self, x: int, y: int):
-        if FRAME_ARR is None and not MOCAP:
-            self.ml_result.setText("Load data first (tab 0).")
-            return
         x_mm, y_mm = ml.px_to_mm(x, y)
         x_mm, y_mm = ml.snap_to_grid(x_mm, y_mm)
         if len(self.state["placed"]) >= config.NUM_MARKERS:
