@@ -689,6 +689,10 @@ class MainWindow(QMainWindow):
         self.thr_slider.setValue(128)
         self.thr_slider.valueChanged.connect(self._on_threshold)
         ctrl.addWidget(self.thr_slider, 1)
+        self.thr_value = QLabel("128")
+        self.thr_value.setMinimumWidth(34)
+        self.thr_value.setAlignment(Qt.AlignCenter)
+        ctrl.addWidget(self.thr_value)
         ctrl.addWidget(QLabel("Offset fine-tune (s):"))
         self.offset_spin = QDoubleSpinBox()
         self.offset_spin.setRange(-60.0, 60.0)
@@ -1070,12 +1074,17 @@ class MainWindow(QMainWindow):
         box = self._box_arrays()
         if box is None:
             self.state["mocap_bin"] = None
-            self.sync_info.setText("Video trace done. Set the mocap 3D box to "
-                                   "compute its trace.")
+            self.sync_info.setText(
+                f"Video trace done: ROI intensity {trace.min():.0f}.."
+                f"{trace.max():.0f} (0-255), threshold "
+                f"{self.state['threshold']:.0f}. Set the mocap 3D box to "
+                f"compute its trace.")
         else:
             self.state["mocap_bin"] = compute_mocap_trace(
                 MOCAP, box[0], box[1]).tolist()
-            msg = "Both traces computed. Try 'Auto-sync'."
+            msg = (f"Both traces computed (video ROI intensity "
+                   f"{trace.min():.0f}..{trace.max():.0f}, threshold "
+                   f"{self.state['threshold']:.0f}). Try 'Auto-sync'.")
             extra = self._trace_warnings()
             if extra:
                 msg += "\n\n" + "\n".join("  ! " + w for w in extra)
@@ -1109,6 +1118,7 @@ class MainWindow(QMainWindow):
 
     def _on_threshold(self, v: int):
         self.state["threshold"] = float(v)
+        self.thr_value.setText(f"{v}")
         if self.state["video_trace"] is not None:
             self.state["video_bin"] = threshold_trace(
                 np.array(self.state["video_trace"]), float(v)).tolist()
