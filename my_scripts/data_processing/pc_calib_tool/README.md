@@ -91,9 +91,13 @@ on this machine they are auto-loaded on start.
    * nudge **Offset fine-tune** (or *Invert/Reset offset*) to perfect it,
      then *Save sync*.  The mocap axes are locked to the whole recording.
 3. **Trim** — One shared start/end (video seconds) applied to both streams.
-4. **Calibrate** — Runs solvePnP (board pose per frame, intrinsics from the
-   same video) + Umeyama fit with iterative outlier rejection → saves
-   `output/transform.json` and shows residual stats.
+4. **Calibrate** — Two steps:
+   1. *Calibrate intrinsics (chessboard)* — self-calibrates the camera matrix
+      from the chessboard video → saves `output/intrinsics.json`.
+   2. *Run calibration (mocap → camera)* — solvePnP (board pose per frame)
+      + Umeyama fit with iterative outlier rejection → saves
+      `output/transform.json` and shows residual stats. Auto-runs step 1
+      first if `intrinsics.json` is missing.
 
 ## Keyboard shortcuts
 

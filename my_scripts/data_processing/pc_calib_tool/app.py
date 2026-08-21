@@ -67,6 +67,7 @@ import config
 import marker_layout as ml
 from calibrate import run_calibration
 from data_loader import load_c3d, pre_extract_frames
+from intrinsics import calibrate_intrinsics
 from mocap_view import render_mocap_2d, render_mocap_3d
 from sync import (
     auto_find_led,
@@ -860,7 +861,15 @@ class MainWindow(QMainWindow):
     def _build_tab4(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
-        run = QPushButton("Run calibration")
+        lay.addWidget(QLabel(
+            "Step 1: self-calibrate the camera from the chessboard video "
+            "(saves output/intrinsics.json).\n"
+            "Step 2: fit the mocap->camera transform using the saved "
+            "intrinsics, markers, sync and trim (saves output/transform.json)."))
+        intr = QPushButton("1) Calibrate intrinsics (chessboard)")
+        intr.clicked.connect(self._on_calibrate_intrinsics)
+        lay.addWidget(intr)
+        run = QPushButton("2) Run calibration (mocap -> camera)")
         run.setStyleSheet("font-weight: bold;")
         run.clicked.connect(self._on_calibrate)
         lay.addWidget(run)
@@ -1370,7 +1379,51 @@ class MainWindow(QMainWindow):
     # ==================================================================
     # Tab 4 handler
     # ==================================================================
+    def _on_calibrate_intrinsics(self):
+        """Stage A: self-calibrate the camera matrix from the chessboard video."""
+        if FRAME_ARR is None:
+            self.cal_out.setText("Load data first (tab 0).")
+            return
+        try:
+            self.cal_out.setText("Detecting chessboard and calibrating "
+                                 "intrinsics - this may take a minute...")
+            r = calibrate_intrinsics(video_path=CURRENT_VIDEO_PATH)
+            lines = [
+                f"Intrinsics from {r['n_detected_frames']}/"
+                f"{r['n_total_frames']} chessboard frames",
+                f"resolution: {r['resolution'][0]}x{r['resolution'][1]}",
+                f"RMS (cv2): {r['rms']:.4f} px",
+                f"mean reprojection: {r['mean_reproj_px']:.3f} px   "
+                f"max: {r['max_reproj_px']:.3f} px",
+                "camera matrix (K):",
+                np.array2string(np.round(np.array(r["camera_matrix"]), 2)),
+                "distortion: " + np.array2string(
+                    np.round(np.array(r["dist_coeffs"]), 5)),
+                "Saved output/intrinsics.json",
+            ]
+            self.cal_out.setText("\n".join(lines))
+        except Exception as e:
+            self.cal_out.setText(f"ERROR: {e}")
+
     def _on_calibrate(self):
+        # Stage A prerequisite: intrinsics must exist (self-calibrate if not)
+        if not config.INTRINSICS_FILE.exists():
+            self.cal_out.setText("output/intrinsics.json missing - "
+                                 "calibrating from the chessboard video first...")
+            try:
+                calibrate_intrinsics(video_path=CURRENT_VIDEO_PATH)
+            except Exception as e:
+                self.cal_out.setText(f"ERROR calibrating intrinsics: {e}")
+                return
+        missing = [p.name for p in (config.MARKERS_FILE, config.SYNC_FILE,
+                                    config.TRIM_FILE)
+                   if not p.exists()]
+        if missing:
+            self.cal_out.setText("Missing required files: "
+                                 + ", ".join(missing) + "\n"
+                                 "Complete the earlier tabs first (marker "
+                                 "layout, save sync, save trim).")
+            return
         try:
             r = run_calibration(video_path=CURRENT_VIDEO_PATH,
                                 c3d_path=CURRENT_C3D_PATH)
