@@ -72,7 +72,6 @@ from sync import (
     auto_find_led,
     compute_mocap_trace,
     compute_video_trace,
-    cross_correlate,
     mocap_index_for_video_time,
     save_sync,
     threshold_trace,
@@ -252,7 +251,9 @@ class TracesCanvas(FigureCanvas):
         super().__init__(self.fig)
         self.setMinimumHeight(230)
 
-    def update_traces(self, state, times: np.ndarray, fps: float) -> None:
+    def update_traces(self, state, times: np.ndarray, fps: float,
+                      cursor_t: float | None = None) -> None:
+        """Plot the traces; ``cursor_t`` (video s) draws a vertical scrub bar."""
         self.fig.clear()
         ax = self.fig.add_subplot(111)
         any_line = False
@@ -275,9 +276,12 @@ class TracesCanvas(FigureCanvas):
         ax.set_xlabel("video time (s)")
         ax.set_ylabel("signal")
         ax.set_title(f"offset = {state['offset']:.3f} s   "
-                     "(video_time = mocap_time + offset)")
+                     "(video_time = mocap_time + offset)  -  drag the scrub "
+                     "slider; align the pulses with Offset fine-tune")
         if any_line:
             ax.legend(loc="upper right", fontsize=8)
+        if cursor_t is not None:
+            ax.axvline(cursor_t, color="gray", ls="--", lw=1.2, alpha=0.9)
         ax.grid(alpha=0.3)
         self.fig.tight_layout()
         self.draw_idle()
@@ -309,6 +313,7 @@ class MainWindow(QMainWindow):
         self._crop_oy = 0
         self._mocap2d_map = None    # pixel->mm map of the last 2D mocap render
         self._box_draw = []         # clicked corners (X, Y mm) while box-drawing
+        self._cursor_t = 0.0        # current sync-scrub position (video s)
 
         self._build_ui()
 
@@ -413,8 +418,8 @@ class MainWindow(QMainWindow):
         self.video_scrub.setValue(0)
         self.mocap_scrub.setRange(0, max(N_MOC - 1, 0))
         self.mocap_scrub.setValue(0)
-        self.sync_scrub.setRange(0.0, max(VIDEO_DUR, 0.01))
-        self.sync_scrub.setValue(0.0)
+        self.sync_scrub.setRange(0, max(N_VID - 1, 0))
+        self.sync_scrub.setValue(0)
         self.trim_start.setRange(0.0, max(VIDEO_DUR, 0.01))
         self.trim_end.setRange(0.0, max(VIDEO_DUR, 0.01))
         self.trim_end.setValue(max(VIDEO_DUR, 0.01))
@@ -430,11 +435,12 @@ class MainWindow(QMainWindow):
         self.state.pop("zoom_focus", None)
         self._box_draw = []
         self._mocap2d_map = None
+        self._cursor_t = 0.0
 
         self._render_canvas()
         self._update_video_views()
         self._update_mocap_views()
-        self.traces.update_traces(self.state, TIMES, FPS_M)
+        self._refresh_traces()
 
         self.status.setText(
             f"Loaded:\n  video: {Path(video_path).name}  "
@@ -674,11 +680,9 @@ class MainWindow(QMainWindow):
         compute = QPushButton("Compute traces")
         compute.setStyleSheet("font-weight: bold;")
         compute.clicked.connect(self._on_compute_traces)
-        auto_sync = QPushButton("Auto-sync")
-        auto_sync.clicked.connect(self._on_auto_sync)
         save_sync = QPushButton("Save sync")
         save_sync.clicked.connect(self._on_save_sync)
-        btns.addWidget(compute); btns.addWidget(auto_sync); btns.addWidget(save_sync)
+        btns.addWidget(compute); btns.addWidget(save_sync)
         btns.addStretch(1)
         root.addLayout(btns)
 
@@ -703,13 +707,18 @@ class MainWindow(QMainWindow):
         invert_btn = QPushButton("Invert offset")
         invert_btn.clicked.connect(self._on_invert_offset)
         ctrl.addWidget(invert_btn)
-        ctrl.addWidget(QLabel("Sync scrub (video s):"))
-        self.sync_scrub = QDoubleSpinBox()
-        self.sync_scrub.setRange(0.0, 1.0)
-        self.sync_scrub.setSingleStep(0.01)
-        self.sync_scrub.setDecimals(3)
+        reset_off = QPushButton("Reset offset")
+        reset_off.clicked.connect(lambda: self.offset_spin.setValue(0.0))
+        ctrl.addWidget(reset_off)
+        ctrl.addWidget(QLabel("Sync scrub:"))
+        self.sync_scrub = QSlider(Qt.Horizontal)
+        self.sync_scrub.setRange(0, 0)
         self.sync_scrub.valueChanged.connect(self._on_sync_scrub)
-        ctrl.addWidget(self.sync_scrub)
+        ctrl.addWidget(self.sync_scrub, 1)
+        self.sync_scrub_label = QLabel("0.00s")
+        self.sync_scrub_label.setMinimumWidth(52)
+        self.sync_scrub_label.setAlignment(Qt.AlignCenter)
+        ctrl.addWidget(self.sync_scrub_label)
         root.addLayout(ctrl)
 
         self.sync_info = QLabel("Compute both traces first.")
@@ -1084,16 +1093,17 @@ class MainWindow(QMainWindow):
                 MOCAP, box[0], box[1]).tolist()
             msg = (f"Both traces computed (video ROI intensity "
                    f"{trace.min():.0f}..{trace.max():.0f}, threshold "
-                   f"{self.state['threshold']:.0f}). Try 'Auto-sync'.")
+                   f"{self.state['threshold']:.0f}). Align the pulses with "
+                   f"'Offset fine-tune', then Save.")
             extra = self._trace_warnings()
             if extra:
                 msg += "\n\n" + "\n".join("  ! " + w for w in extra)
             self.sync_info.setText(msg)
-        self.traces.update_traces(self.state, TIMES, FPS_M)
+        self._refresh_traces()
 
     def _trace_warnings(self) -> list[str]:
-        """Flag degenerate binary traces that make auto-sync's agreement
-        meaningless (a blink needs both traces to actually toggle)."""
+        """Flag degenerate binary traces (a blink needs both traces to
+        actually toggle, otherwise manual pulse alignment is impossible)."""
         warns = []
         vb = self.state.get("video_bin")
         if vb is not None:
@@ -1122,7 +1132,7 @@ class MainWindow(QMainWindow):
         if self.state["video_trace"] is not None:
             self.state["video_bin"] = threshold_trace(
                 np.array(self.state["video_trace"]), float(v)).tolist()
-        self.traces.update_traces(self.state, TIMES, FPS_M)
+        self._refresh_traces()
         if self.state.get("video_bin") is not None or \
                 self.state.get("mocap_bin") is not None:
             extra = self._trace_warnings()
@@ -1131,35 +1141,17 @@ class MainWindow(QMainWindow):
                     "\n".join("  ! " + w for w in extra)
             else:
                 msg = (f"Threshold updated to {v}. Video binary now toggles "
-                       f"(LED on/off detected) - ready for 'Auto-sync'.")
+                       f"(LED on/off detected) - align pulses with 'Offset "
+                       f"fine-tune', then Save.")
             self.sync_info.setText(msg)
-
-    def _on_auto_sync(self):
-        if self.state["video_bin"] is None or self.state["mocap_bin"] is None:
-            self.sync_info.setText("Compute both traces first.")
-            return
-        off, agree = cross_correlate(
-            np.array(self.state["video_bin"]), TIMES,
-            np.array(self.state["mocap_bin"]), FPS_M, max_offset=60.0)
-        self.state["offset"] = float(off)
-        self.offset_spin.setValue(float(off))
-        msg = (f"Proposed offset = {off:.3f} s (video_time = mocap_time + offset), "
-               f"agreement = {agree:.3f}. Fine-tune below, then Save.")
-        extra = self._trace_warnings()
-        if extra:
-            msg += ("\n\nCAUTION: " + "\n".join("  ! " + w for w in extra) +
-                    "\n  A constant trace makes agreement misleading - fix it "
-                    "before trusting this offset.")
-        self.sync_info.setText(msg)
-        self.traces.update_traces(self.state, TIMES, FPS_M)
 
     def _on_offset(self, v: float):
         self.state["offset"] = float(v)
-        self.traces.update_traces(self.state, TIMES, FPS_M)
+        self._refresh_traces()
 
     def _on_invert_offset(self):
-        """Flip the sign of the offset (auto-sync can pick the wrong-signed
-        twin when the blink pattern is ambiguous)."""
+        """Flip the sign of the offset (useful when the pulses align on the
+        opposite side of the shared axis)."""
         self.offset_spin.setValue(-self.offset_spin.value())
         # re-sync both viewers at the current scrub position immediately
         if FRAME_ARR is not None:
@@ -1175,11 +1167,20 @@ class MainWindow(QMainWindow):
         self.sync_info.setText(
             f"Saved output/sync.json  offset={self.state['offset']:.3f} s")
 
-    def _on_sync_scrub(self, t_video: float):
-        if FRAME_ARR is None:
+    def _refresh_traces(self):
+        """Redraw the traces plot with the current scrub cursor."""
+        self.traces.update_traces(self.state, TIMES, FPS_M,
+                                  cursor_t=self._cursor_t)
+
+    def _on_sync_scrub(self, frame: int):
+        """Drag the sync scrub: move BOTH viewers, draw the cursor bar."""
+        if FRAME_ARR is None or not len(TIMES):
             return
-        vi = int(np.argmin(np.abs(TIMES - t_video)))
-        t_m = TIMES[vi] - self.state["offset"]          # mapped mocap time
+        vi = max(0, min(int(frame), N_VID - 1))
+        t_video = float(TIMES[vi])
+        self._cursor_t = t_video
+        self.sync_scrub_label.setText(f"{t_video:.2f}s")
+        t_m = t_video - self.state["offset"]          # mapped mocap time
         mi = int(round(t_m * FPS_M))
         clamped = mi < 0 or mi >= N_MOC
         mi = max(0, min(mi, N_MOC - 1))
@@ -1195,12 +1196,13 @@ class MainWindow(QMainWindow):
             # show why the mocap view sat at an edge instead of moving
             self.mocap_frame_info.setText(
                 f"frame {mi}/{max(N_MOC - 1, 0)}  t={t_m:.3f}s   "
-                f"[video {TIMES[vi]:.2f}s -> mocap {t_m:.2f}s is OUT OF "
+                f"[video {t_video:.2f}s -> mocap {t_m:.2f}s is OUT OF "
                 f"RANGE, clamped to {mi}]")
         else:
             self.mocap_frame_info.setText(
                 f"frame {mi}/{max(N_MOC - 1, 0)}  t={t_m:.3f}s "
-                f"(video {TIMES[vi]:.2f}s)")
+                f"(video {t_video:.2f}s)")
+        self._refresh_traces()
 
     # ==================================================================
     # Tab 3 handlers

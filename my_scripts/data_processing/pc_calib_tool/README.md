@@ -70,10 +70,13 @@ on this machine they are auto-loaded on start.
    *Compute traces* (intensity trace + threshold → binary).  Mocap: set the
    3D box by **clicking 2 corners on the 2D top view** (X–Y rectangle; the Z
    center and ±half come from the box spinboxes), or use *Auto-find LED* →
-   presence trace.  *Auto-sync* (cross-correlation proposes the offset) →
-   fine-tune with the offset spin → *Save sync*.  The synchronized scrub
-   moves both viewers together.  The mocap axes are locked to the whole
-   recording, so the view doesn't rescale while scrubbing.
+   presence trace.  Both binary traces are plotted on a **shared axis
+   starting at 0**; drag the **sync scrub slider** to move the RGB + C3D
+   views together (a dashed **vertical cursor** shows the scrub position on
+   the plot), and nudge **Offset fine-tune** (or *Invert/Reset offset*) until
+   the green and red pulses line up — that is your sync.  *Save sync* writes
+   it.  The mocap axes are locked to the whole recording, so the view
+   doesn't rescale while scrubbing.
 3. **Trim** — One shared start/end (video seconds) applied to both streams.
 4. **Calibrate** — Runs solvePnP (board pose per frame, intrinsics from the
    same video) + Umeyama fit with iterative outlier rejection → saves
