@@ -1,0 +1,8 @@
+# PC (native desktop) version of the iPad<->Mocap calibration tool.
+# No gradio needed - the UI is a PyQt5 window with in-process rendering.
+PyQt5>=5.15
+opencv-python>=4.5
+ezc3d>=1.5
+numpy
+scipy
+matplotlib

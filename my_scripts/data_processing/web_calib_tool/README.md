@@ -1,4 +1,4 @@
-# iPad ↔ Mocap Calibration Tool
+# iPad ↔ Mocap Calibration Tool (web / Gradio version)
 
 Calibrates an iPad camera to an already-calibrated motion-capture system
 (Vicon/QTM-style) using a 40 mm 9×6 chessboard (8×5 inner corners) with 6
@@ -7,6 +7,12 @@ pattern, synchronized by a flashing light bulb.
 
 Output: the rigid transform **mocap → camera** (`P_camera = R @ P_mocap + t`,
 mm) plus the camera intrinsics.
+
+> **Heads-up:** this is the **web (Gradio)** version, meant to run headless on
+> a server and be opened in a browser.  If scrubbing through the video feels
+> laggy, use the **PC (native PyQt5) version** in `../pc_calib_tool/` — it runs
+> on a machine with a display and renders in-process, so scrubbing is instant.
+> Both versions share the same workflow and write the same `output/*.json`.
 
 ## Requirements
 

@@ -1,0 +1,112 @@
+# iPad ↔ Mocap Calibration Tool — PC (native desktop) version
+
+Calibrates an iPad camera to an already-calibrated motion-capture system
+(Vicon/QTM-style) using a 40 mm 9×6 chessboard (8×5 inner corners) with 6
+reflective markers (`Board1`–`Board6`) placed on a 40 mm grid *outside* the
+pattern, synchronized by a flashing light bulb.
+
+Output: the rigid transform **mocap → camera** (`P_camera = R @ P_mocap + t`,
+mm) plus the camera intrinsics.
+
+This is the **native desktop** sibling of `../web_calib_tool/`.  It has the
+exact same 5-stage workflow and writes the same `output/*.json` files, but it
+runs as a local **PyQt5 window instead of a Gradio web app** — there is no
+browser and no server round-trip, so **video scrubbing is instant** (frames are
+preloaded into RAM and blitted straight to the widget).
+
+## Why a PC version?
+
+The Gradio web app was laggy when scrubbing through the video (every scrub
+goes server → browser → image encoding → network).  This version renders
+everything in-process on the machine with the monitor:
+
+* scrub slider updates the view in the same event loop — no network, no delay
+* click *directly on the video* to draw the LED ROI box (2 clicks)
+* click the video scrub slider, then use **arrow keys** for frame-exact
+  scrubbing (`PageUp`/`PageDown` = ±10 frames)
+
+## Requirements
+
+Python 3.10+, `PyQt5`, `opencv-python`, `ezc3d`, `numpy`, `scipy`,
+`matplotlib`.  (No `gradio` needed.)
+
+```bash
+pip install -r requirements.txt
+```
+
+## Run
+
+```bash
+python3 app.py
+```
+
+A window opens (must be on a machine with a display).  Set the iPad video +
+C3D paths in **tab 0**, click *Load data*.  If the saved/default paths exist
+on this machine they are auto-loaded on start.
+
+## Workflow (5 tabs, in order)
+
+0. **Data** — Set the paths to your iPad video and C3D mocap file (pre-filled
+   from `config.py` / `output/settings.json`), click *Load data*.
+1. **Marker layout** — Click the 6 orange dots on the board schematic where
+   the reflective markers sit (grid = 40 mm).  Click order is arbitrary; the
+   tool auto-matches your clicks to the C3D `Board1..Board6` labels by rigid
+   distance matching and reports the error.  Save when verified.
+2. **Sync** — Video: click 2 points on the video to box the flashing LED →
+   *Compute traces* (intensity trace + threshold → binary).  Mocap: set the
+   3D box (or *Auto-find LED*) → presence trace.  *Auto-sync*
+   (cross-correlation proposes the offset) → fine-tune with the offset spin →
+   *Save sync*.  The synchronized scrub moves both viewers together.
+3. **Trim** — One shared start/end (video seconds) applied to both streams.
+4. **Calibrate** — Runs solvePnP (board pose per frame, intrinsics from the
+   same video) + Umeyama fit with iterative outlier rejection → saves
+   `output/transform.json` and shows residual stats.
+
+## Keyboard shortcuts
+
+* Click the **video scrub slider**, then `←`/`→` = ±1 frame, `PageUp`/`PageDown`
+  = ±10 frames.  (`Home`/`End` = first/last frame.)
+
+## Output files (`output/`)
+
+Same format as the web version:
+
+| File | Contents |
+|---|---|
+| `intrinsics.json` | camera matrix + distortion (self-calibrated at video res) |
+| `markers.json` | board-frame marker positions (mm) + C3D label assignment |
+| `sync.json` | time offset (`video_time = mocap_time + offset_s`) + ROI/box |
+| `trim.json` | shared trim window (video seconds) |
+| `transform.json` | `R`, `t` (mocap→camera, mm) + residual stats |
+| `settings.json` | last-used video/C3D paths (pre-filled in the Data tab) |
+
+## Design notes (same as web version)
+
+- **Time-based sync, not frame indices** — the iPad video is variable frame
+  rate (~27.6 fps avg), so every frame is pre-extracted with its real
+  timestamp; the C3D is uniform (100 Hz).  `video_time = mocap_time + offset_s`.
+- **Intrinsics self-calibrated** from the chessboard video itself (exact
+  720×1280 resolution).
+- **Planar-target handling** — solvePnP's twin ambiguity is resolved by
+  keeping the board normal facing the camera; a robust outlier loop rejects
+  corner-order-flipped / bad frames.
+- For best auto-sync results, use a **distinctive blink pattern** in the LED
+  (a few short pulses) rather than a long steady ON.
+
+## Tests
+
+```bash
+python3 test_calibration.py   # synthetic validation of the calibration math
+```
+
+## Files
+
+- `config.py` — paths (defaults + `settings.json` persistence), board params, marker names
+- `data_loader.py` — frame pre-extraction (JPEG cache + timestamps), C3D loading
+- `intrinsics.py` — chessboard detection + `calibrateCamera`
+- `marker_layout.py` — Stage-1 canvas + C3D distance verification
+- `sync.py` — traces, threshold, cross-correlation, auto-find LED
+- `mocap_view.py` — 3D/2D mocap rendering
+- `trim.py` — shared trim logic
+- `calibrate.py` — solvePnP + Umeyama + outlier rejection
+- `app.py` — PyQt5 desktop UI (5 tabs)
