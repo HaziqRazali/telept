@@ -22,6 +22,10 @@ everything in-process on the machine with the monitor:
 
 * scrub slider updates the view in the same event loop — no network, no delay
 * click *directly on the video* to draw the LED ROI box (2 clicks)
+* **middle-mouse scrollwheel** over the video zooms in/out **around the cursor**
+  (1.2× per notch; the *Video zoom* spin does the same, recentred)
+* every image pane scales to **fit** its widget — the full RGB frame is always
+  visible, never clipped
 * click the video scrub slider, then use **arrow keys** for frame-exact
   scrubbing (`PageUp`/`PageDown` = ±10 frames)
 

@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSlider,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QTextEdit,
@@ -155,58 +156,92 @@ def _bgr_to_pixmap(bgr: np.ndarray) -> QPixmap:
 # Widgets
 # ----------------------------------------------------------------------
 class ClickableLabel(QLabel):
-    """QLabel that reports clicks in SOURCE-image pixel coordinates.
+    """QLabel that shows an image scaled to FIT the widget (aspect kept) and
+    reports clicks / wheel events in SOURCE-image pixel coordinates.
 
-    setSource() shows ``rgb`` scaled down to fit a display box and remembers
-    the scale, so mousePressEvent emits the corresponding source pixel.
+    setSource()/setArray() store the full-res image; it is re-scaled to fit
+    the widget on every show/resize, so the whole image is always visible
+    (never clipped) and clicks map back to exact source pixels.
     """
 
-    clicked = Signal(int, int)  # (x, y) in source-image pixels
+    clicked = Signal(int, int)             # (x, y) in source-image pixels
+    wheelZoomed = Signal(float, int, int)  # (factor, src_x, src_y) on wheel
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._src_w = 1
+        self._src_h = 1
         self._sx = 1.0
         self._sy = 1.0
+        self._pix = None                   # full-res pixmap (source)
         self.setMinimumSize(200, 120)
         self.setAlignment(Qt.AlignCenter)
         self.setStyleSheet("background-color: #1c1c1c; border: 1px solid #3c3c3c;")
+        # fill the space the layout gives us (sizeHint is irrelevant: we fit)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
 
-    def setSource(self, rgb: np.ndarray, src_w: int, src_h: int,
-                  disp_w: int, disp_h: int) -> None:
-        """Display ``rgb`` scaled into a disp_w x disp_h box (keeps aspect)."""
+    # -- image input ---------------------------------------------------
+    def setSource(self, rgb: np.ndarray, src_w: int, src_h: int) -> None:
+        """Store an RGB image; display scaled to fit the widget."""
         if rgb is None or rgb.size == 0:
             self.clear()
             return
-        pix = _rgb_to_pixmap(rgb)
-        if disp_w and disp_h:
-            pix = pix.scaled(max(disp_w, 1), max(disp_h, 1),
-                             Qt.KeepAspectRatio, Qt.FastTransformation)
-        self._sx = src_w / max(pix.width(), 1)
-        self._sy = src_h / max(pix.height(), 1)
-        self.setPixmap(pix)
+        self._src_w, self._src_h = src_w, src_h
+        self._pix = _rgb_to_pixmap(rgb)
+        self._refit()
 
     def setArray(self, rgb: np.ndarray) -> None:
-        """Display an RGB array at native resolution (1:1 pixel mapping)."""
+        """Display an RGB array at its native aspect, scaled to fit."""
         if rgb is None or rgb.size == 0:
             self.clear()
             return
-        self._sx = self._sy = 1.0
-        self.setPixmap(_rgb_to_pixmap(rgb))
+        self.setSource(rgb, rgb.shape[1], rgb.shape[0])
 
-    def mousePressEvent(self, ev) -> None:
+    def clear(self) -> None:
+        self._pix = None
+        super().clear()
+
+    # -- fit to widget --------------------------------------------------
+    def _refit(self) -> None:
+        if self._pix is None or self._pix.isNull():
+            return
+        ww, wh = self.width(), self.height()
+        if ww <= 1 or wh <= 1:
+            return
+        scaled = self._pix.scaled(ww, wh, Qt.KeepAspectRatio,
+                                  Qt.FastTransformation)
+        self._sx = self._src_w / max(scaled.width(), 1)
+        self._sy = self._src_h / max(scaled.height(), 1)
+        self.setPixmap(scaled)
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        self._refit()
+
+    # -- interaction ----------------------------------------------------
+    def _widget_to_source(self, pos) -> tuple[int, int]:
+        """Map a widget-coordinate point to source-image pixels."""
         pix = self.pixmap()
         if pix is None or pix.isNull():
-            return
-        # The pixmap is drawn CENTERED in the widget (Qt.AlignCenter), so
-        # widget coords only equal pixmap coords when the label happens to be
-        # exactly the pixmap size.  Map the click to pixmap coords first
-        # (handles both a bigger widget -> margins and a smaller widget ->
-        # clipping), then to source-image pixels via _sx/_sy.
+            return 0, 0
+        # The (scaled) pixmap is drawn CENTERED in the widget; go
+        # widget coords -> pixmap coords -> source pixels.
         ox = (self.width() - pix.width()) // 2
         oy = (self.height() - pix.height()) // 2
-        x = int((ev.pos().x() - ox) * self._sx)
-        y = int((ev.pos().y() - oy) * self._sy)
+        return int((pos.x() - ox) * self._sx), int((pos.y() - oy) * self._sy)
+
+    def mousePressEvent(self, ev) -> None:
+        x, y = self._widget_to_source(ev.pos())
         self.clicked.emit(x, y)
+
+    def wheelEvent(self, ev) -> None:
+        delta = ev.angleDelta().y()
+        if delta:
+            # Qt6: ev.position() -> QPointF (widget coords)
+            x, y = self._widget_to_source(ev.position())
+            factor = 1.2 if delta > 0 else 1.0 / 1.2
+            self.wheelZoomed.emit(factor, x, y)
+        ev.accept()
 
 
 class TracesCanvas(FigureCanvas):
@@ -270,7 +305,6 @@ class MainWindow(QMainWindow):
             "offset": 0.0,
             "zoom": 1.0,
         }
-        self._disp_w = 900          # video display width (px), aspect kept
         self._crop_ox = 0           # zoom-crop origin (full-frame px)
         self._crop_oy = 0
 
@@ -371,7 +405,6 @@ class MainWindow(QMainWindow):
         self.status.setText("Preloading frames into RAM…")
         FRAME_ARR = self._preload_frames(FRAMES)
         IMG_H, IMG_W = FRAME_ARR.shape[1], FRAME_ARR.shape[2]
-        self._disp_w = max(640, min(920, int(IMG_W * 0.72)))
 
         # update widget ranges
         self.video_scrub.setRange(0, max(N_VID - 1, 0))
@@ -392,6 +425,7 @@ class MainWindow(QMainWindow):
             "video_trace": None, "video_bin": None, "mocap_bin": None,
             "threshold": 128.0, "offset": 0.0, "zoom": 1.0,
         })
+        self.state.pop("zoom_focus", None)
 
         self._render_canvas()
         self._update_video_views()
@@ -529,6 +563,7 @@ class MainWindow(QMainWindow):
         self.video_view = ClickableLabel()
         self.video_view.setMinimumSize(640, 360)
         self.video_view.clicked.connect(self._on_video_click)
+        self.video_view.wheelZoomed.connect(self._on_video_wheel_zoom)
         vcol.addWidget(self.video_view, 1)
 
         self.zoom_view = QLabel()
@@ -724,15 +759,23 @@ class MainWindow(QMainWindow):
     # Rendering helpers
     # ==================================================================
     def _zoom_crop_region(self) -> tuple[int, int, int, int]:
-        """(x0, y0, cw, ch) of the zoom crop in full-frame pixels."""
+        """(x0, y0, cw, ch) of the zoom crop in full-frame pixels.
+
+        Centers on the wheel-zoom focus point if set, else the ROI center,
+        else the frame center.
+        """
         zoom = self.state.get("zoom", 1.0)
         W, H = IMG_W, IMG_H
         if not zoom or zoom <= 1.0:
             return 0, 0, W, H
-        roi = self.state["video_roi"]
-        cx, cy = W // 2, H // 2
-        if roi is not None:
-            cx, cy = (roi[0] + roi[2]) // 2, (roi[1] + roi[3]) // 2
+        focus = self.state.get("zoom_focus")
+        if focus is not None:
+            cx, cy = int(focus[0]), int(focus[1])
+        else:
+            cx, cy = W // 2, H // 2
+            roi = self.state["video_roi"]
+            if roi is not None:
+                cx, cy = (roi[0] + roi[2]) // 2, (roi[1] + roi[3]) // 2
         cw = max(int(W / zoom), 1)
         ch = max(int(H / zoom), 1)
         x0 = max(0, min(cx - cw // 2, W - cw))
@@ -799,9 +842,8 @@ class MainWindow(QMainWindow):
         bgr, ox, oy = self._render_video_bgr(idx)
         self._crop_ox, self._crop_oy = ox, oy
         src_h, src_w = bgr.shape[:2]
-        disp_h = max(1, int(round(self._disp_w * src_h / src_w)))
         self.video_view.setSource(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB),
-                                  src_w, src_h, self._disp_w, disp_h)
+                                  src_w, src_h)
         zoom = self._roi_crop_rgb(idx)
         if zoom is not None:
             self.zoom_view.setPixmap(_rgb_to_pixmap(zoom))
@@ -849,11 +891,30 @@ class MainWindow(QMainWindow):
 
     def _on_zoom(self, z: float):
         self.state["zoom"] = float(z)
+        self.state.pop("zoom_focus", None)  # spinbox zoom recenters
+        self._update_video_views()
+
+    def _on_video_wheel_zoom(self, factor: float, x_in_view: int, y_in_view: int):
+        """Middle-mouse scrollwheel zoom around the cursor position."""
+        if FRAME_ARR is None:
+            return
+        z = float(self.state.get("zoom", 1.0)) * factor
+        z = max(1.0, min(8.0, z))
+        self.state["zoom"] = z
+        # keep the point under the cursor fixed while zooming
+        self.state["zoom_focus"] = (
+            min(self._crop_ox + x_in_view, IMG_W - 1),
+            min(self._crop_oy + y_in_view, IMG_H - 1),
+        )
+        self.zoom_spin.blockSignals(True)
+        self.zoom_spin.setValue(z)
+        self.zoom_spin.blockSignals(False)
         self._update_video_views()
 
     def _on_reset_roi(self):
         self.state["video_roi"] = None
         self.state["roi_click"] = None
+        self.state.pop("zoom_focus", None)
         self.roi_status.setText("ROI cleared. Click 2 points on the video to "
                                 "set a new one.")
         self._update_video_views()
