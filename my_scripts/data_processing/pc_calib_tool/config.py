@@ -15,7 +15,7 @@ VIDEO_PATH = Path(
     "/home/haziq/datasets/telept/data/NUS/ipad/rgb_1787045535038.mp4"
 )
 C3D_PATH = Path(
-    "/home/haziq/datasets/telept/data/NUS/mocap/mocap_rgb_calib_sync01.c3d"
+    "/home/haziq/datasets/telept/data/NUS/mocap/mocap_rgb_calib_sync_real.c3d"
 )
 
 # Derived dirs (auto-created on import)
