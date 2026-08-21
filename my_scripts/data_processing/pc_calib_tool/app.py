@@ -627,20 +627,30 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.ml_result.setText(f"ERROR reading {fn}: {e}")
             return
+        markers = data.get("markers")
+        if not isinstance(markers, list) or not markers:
+            self.ml_result.setText(
+                f"'{Path(fn).name}' is not a marker layout file "
+                "(no 'markers' list).\n"
+                "Pick the markers.json saved by 'Save markers', or place "
+                "the markers again in this tab and click 'Save markers'.")
+            return
         bc = data.get("board_inner_corners")
         sq = data.get("square_size_mm")
         mg = data.get("margin_squares")
-        if bc and sq and mg:
+        has_board = bc and sq and mg is not None
+        if has_board:
             self._apply_board_config(bc, sq, mg)
-        placed = [[float(m["x_mm"]), float(m["y_mm"])]
-                  for m in data.get("markers", [])]
+        placed = [[float(m["x_mm"]), float(m["y_mm"])] for m in markers]
         self.state["placed"] = placed
         self._render_canvas()
-        names = ", ".join(m.get("name", "?") for m in data.get("markers", []))
+        names = ", ".join(m.get("name", "?") for m in markers)
+        board_info = (f"board: {bc[0]}x{bc[1]} squares, {sq:.0f} mm, "
+                      f"{mg} margin squares\n" if has_board
+                      else "board config: not in file (keeping current)\n")
         self.ml_result.setText(
             f"Loaded {len(placed)} markers from {Path(fn).name}\n"
-            f"board: {bc[0]}x{bc[1]} squares, {sq:.0f} mm, "
-            f"{mg} margin squares\nsaved labels: {names}\n"
+            f"{board_info}saved labels: {names}\n"
             "Click 'Verify vs C3D' to confirm.")
 
     # ---- Tab 2: sync --------------------------------------------------
@@ -1419,10 +1429,16 @@ class MainWindow(QMainWindow):
                                     config.TRIM_FILE)
                    if not p.exists()]
         if missing:
-            self.cal_out.setText("Missing required files: "
-                                 + ", ".join(missing) + "\n"
-                                 "Complete the earlier tabs first (marker "
-                                 "layout, save sync, save trim).")
+            how = {
+                "markers.json": "tab 1: place all 6 markers, then click "
+                                "'Save markers'",
+                "sync.json": "tab 2: align the bars / set the offset, then "
+                              "click 'Save sync'",
+                "trim.json": "tab 3: set start/end, then click 'Save trim'",
+            }
+            self.cal_out.setText(
+                "Missing required files: " + ", ".join(missing) + "\n" +
+                "\n".join(f"  {n}: {how[n]}" for n in missing))
             return
         try:
             r = run_calibration(video_path=CURRENT_VIDEO_PATH,
