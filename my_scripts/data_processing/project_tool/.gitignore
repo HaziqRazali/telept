@@ -1,0 +1,5 @@
+# Projection tool - don't commit generated/runtime state
+__pycache__/
+cache/
+output/
+.venv/
