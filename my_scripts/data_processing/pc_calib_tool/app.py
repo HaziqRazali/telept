@@ -65,9 +65,9 @@ from matplotlib.figure import Figure
 
 import config
 import marker_layout as ml
-from calibrate import run_calibration
+from calibrate import load_markers_mm, run_calibration, solve_board_pose
 from data_loader import load_c3d, pre_extract_frames
-from intrinsics import calibrate_intrinsics
+from intrinsics import calibrate_intrinsics, detect_board
 from mocap_view import render_mocap_2d, render_mocap_3d
 from sync import (
     auto_find_led,
@@ -883,8 +883,20 @@ class MainWindow(QMainWindow):
         run.setStyleSheet("font-weight: bold;")
         run.clicked.connect(self._on_calibrate)
         lay.addWidget(run)
+        prev = QPushButton("3) Preview transform on video (sanity check)")
+        prev.clicked.connect(self._on_preview_verify)
+        lay.addWidget(prev)
+        self.cal_preview = ClickableLabel()
+        self.cal_preview.setMinimumHeight(260)
+        lay.addWidget(self.cal_preview, 1)
+        self.cal_preview_cap = QLabel(
+            "Run steps 1-2, then click 3) to project the mocap markers "
+            "onto a video frame and check they land on the chessboard.")
+        self.cal_preview_cap.setWordWrap(True)
+        lay.addWidget(self.cal_preview_cap)
         self.cal_out = QTextEdit()
         self.cal_out.setReadOnly(True)
+        self.cal_out.setMaximumHeight(150)
         lay.addWidget(self.cal_out)
         return w
 
@@ -1414,6 +1426,116 @@ class MainWindow(QMainWindow):
             self.cal_out.setText("\n".join(lines))
         except Exception as e:
             self.cal_out.setText(f"ERROR: {e}")
+
+    def _on_preview_verify(self):
+        """Project the mocap Board markers into a video frame using the saved
+        transform.json - a visual sanity check of the calibration.
+
+        Red circles = Board1..6 projected from mocap via transform.json.
+        Green circles = where the board-pose (solvePnP) puts them.
+        With a good calibration + correct sync they coincide on the board.
+        """
+        if not MOCAP:
+            self.cal_out.setText("Load data first (tab 0).")
+            return
+        if not config.TRANSFORM_FILE.exists():
+            self.cal_out.setText("output/transform.json missing - run "
+                                 "'2) Run calibration' first.")
+            return
+        if not config.INTRINSICS_FILE.exists():
+            self.cal_out.setText("output/intrinsics.json missing - run "
+                                 "'1) Calibrate intrinsics' first.")
+            return
+        try:
+            tf = json.loads(config.TRANSFORM_FILE.read_text())
+            intr = json.loads(config.INTRINSICS_FILE.read_text())
+            sync = json.loads(config.SYNC_FILE.read_text())
+            trim = json.loads(config.TRIM_FILE.read_text())
+        except Exception as e:
+            self.cal_out.setText(f"ERROR reading saved files: {e}")
+            return
+        R = np.array(tf["rotation"])
+        t = np.array(tf["translation_mm"])
+        K = np.array(intr["camera_matrix"])
+        dist = np.array(intr["dist_coeffs"])
+        offset = float(sync.get("offset_s", 0.0))
+
+        # pick a trim-window frame with the chessboard detected (middle out)
+        lo = max(0, int(np.searchsorted(TIMES, trim["start_s"])))
+        hi = min(len(TIMES) - 1, int(np.searchsorted(TIMES, trim["end_s"])))
+        vi = None
+        for dv in range(0, hi - lo + 1):
+            for cand in (lo + dv, hi - dv):
+                if not (lo <= cand <= hi):
+                    continue
+                img0 = FRAME_ARR[cand] if FRAME_ARR is not None else \
+                    cv2.imread(str(config.FRAME_DIR / f"{cand:06d}.jpg"))
+                if img0 is None:
+                    continue
+                ok, _ = detect_board(cv2.cvtColor(img0, cv2.COLOR_BGR2GRAY))
+                if ok:
+                    vi = cand
+                    break
+            if vi is not None:
+                break
+        if vi is None:
+            self.cal_out.setText("No chessboard found in the trim window - "
+                                 "nothing to preview.")
+            return
+
+        img = (FRAME_ARR[vi] if FRAME_ARR is not None else
+               cv2.imread(str(config.FRAME_DIR / f"{vi:06d}.jpg"))).copy()
+        tv = float(TIMES[vi])
+        mi = mocap_index_for_video_time(tv, offset, FPS_M)
+        if mi < 0 or mi >= N_MOC:
+            self.cal_out.setText(f"mocap frame {mi} out of range for video "
+                                 f"{tv:.2f}s - check the sync offset.")
+            return
+        label_idx = {n: i for i, n in enumerate(MOCAP["labels"])}
+        try:
+            mi_list = [label_idx[n] for n in config.MARKER_NAMES]
+        except KeyError as e:
+            self.cal_out.setText(f"Marker {e} not found in the mocap labels.")
+            return
+        if not all(MOCAP["presence"][j, mi] for j in mi_list):
+            self.cal_out.setText(
+                f"Mocap Board markers not all tracked at mocap frame {mi} "
+                f"({mi / FPS_M:.2f}s) - adjust the trim window.")
+            return
+
+        # chessboard corners (small green dots) for context
+        ok, corners = detect_board(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+        if ok:
+            for c in corners.reshape(-1, 2):
+                cv2.circle(img, (int(c[0]), int(c[1])), 3, (0, 220, 0), -1)
+
+        # green = board-pose markers (solvePnP + marker layout)
+        if ok:
+            Rb, tb = solve_board_pose(corners, K, dist)
+            mm = load_markers_mm()
+            proj_b, _ = cv2.projectPoints(mm, cv2.Rodrigues(Rb)[0], tb, K, dist)
+            for c in proj_b[:, 0, :]:
+                cv2.circle(img, (int(c[0]), int(c[1])), 12, (0, 220, 0), 2)
+
+        # red = mocap markers projected via transform.json
+        Pm = MOCAP["xyz"][mi_list, :, mi]  # (6,3) mocap frame
+        Pc = (R @ Pm.T + t[:, None]).T     # (6,3) camera frame
+        proj, _ = cv2.projectPoints(Pc.astype(np.float64),
+                                    np.zeros(3), np.zeros(3), K, dist)
+        for k, c in enumerate(proj[:, 0, :]):
+            x, y = int(c[0]), int(c[1])
+            cv2.circle(img, (x, y), 12, (0, 0, 255), 2)
+            cv2.putText(img, config.MARKER_NAMES[k], (x + 14, y - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
+                        cv2.LINE_AA)
+
+        self.cal_preview.setArray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        self.cal_preview_cap.setText(
+            f"frame {vi}  video {tv:.2f}s  mocap {mi} ({mi / FPS_M:.2f}s)  "
+            f"offset {offset:.3f}s\n"
+            "green dots = detected chessboard; green rings = board-pose "
+            "markers; red rings = mocap markers via transform.json\n"
+            "Red and green should coincide on the chessboard border.")
 
     def _on_calibrate(self):
         # Stage A prerequisite: intrinsics must exist (self-calibrate if not)
