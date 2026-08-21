@@ -1075,8 +1075,37 @@ class MainWindow(QMainWindow):
         else:
             self.state["mocap_bin"] = compute_mocap_trace(
                 MOCAP, box[0], box[1]).tolist()
-            self.sync_info.setText("Both traces computed. Try 'Auto-sync'.")
+            msg = "Both traces computed. Try 'Auto-sync'."
+            extra = self._trace_warnings()
+            if extra:
+                msg += "\n\n" + "\n".join("  ! " + w for w in extra)
+            self.sync_info.setText(msg)
         self.traces.update_traces(self.state, TIMES, FPS_M)
+
+    def _trace_warnings(self) -> list[str]:
+        """Flag degenerate binary traces that make auto-sync's agreement
+        meaningless (a blink needs both traces to actually toggle)."""
+        warns = []
+        vb = self.state.get("video_bin")
+        if vb is not None:
+            frac = float(np.asarray(vb).mean())
+            if frac == 0.0:
+                warns.append("video binary is ALL 0 - the LED never crosses the "
+                             "threshold (ROI off-target or threshold too high)")
+            elif frac == 1.0:
+                warns.append("video binary is ALL 1 - the ROI is always above the "
+                             "threshold; RAISE 'Video threshold' until the LED's "
+                             "OFF state drops below it")
+        mb = self.state.get("mocap_bin")
+        if mb is not None:
+            frac = float(np.asarray(mb).mean())
+            if frac == 0.0:
+                warns.append("mocap binary is ALL 0 - no marker inside the 3D box; "
+                             "move/resize the box around the blinking LED")
+            elif frac == 1.0:
+                warns.append("mocap binary is ALL 1 - a marker is ALWAYS inside the "
+                             "3D box; shrink it around just the blinking LED")
+        return warns
 
     def _on_threshold(self, v: int):
         self.state["threshold"] = float(v)
@@ -1084,6 +1113,13 @@ class MainWindow(QMainWindow):
             self.state["video_bin"] = threshold_trace(
                 np.array(self.state["video_trace"]), float(v)).tolist()
         self.traces.update_traces(self.state, TIMES, FPS_M)
+        if self.state.get("video_bin") is not None or \
+                self.state.get("mocap_bin") is not None:
+            extra = self._trace_warnings()
+            if extra:
+                self.sync_info.setText(
+                    "Threshold updated.\n\n" +
+                    "\n".join("  ! " + w for w in extra))
 
     def _on_auto_sync(self):
         if self.state["video_bin"] is None or self.state["mocap_bin"] is None:
@@ -1094,9 +1130,14 @@ class MainWindow(QMainWindow):
             np.array(self.state["mocap_bin"]), FPS_M, max_offset=60.0)
         self.state["offset"] = float(off)
         self.offset_spin.setValue(float(off))
-        self.sync_info.setText(
-            f"Proposed offset = {off:.3f} s (video_time = mocap_time + offset), "
-            f"agreement = {agree:.3f}. Fine-tune below, then Save.")
+        msg = (f"Proposed offset = {off:.3f} s (video_time = mocap_time + offset), "
+               f"agreement = {agree:.3f}. Fine-tune below, then Save.")
+        extra = self._trace_warnings()
+        if extra:
+            msg += ("\n\nCAUTION: " + "\n".join("  ! " + w for w in extra) +
+                    "\n  A constant trace makes agreement misleading - fix it "
+                    "before trusting this offset.")
+        self.sync_info.setText(msg)
         self.traces.update_traces(self.state, TIMES, FPS_M)
 
     def _on_offset(self, v: float):
