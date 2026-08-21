@@ -252,8 +252,10 @@ class TracesCanvas(FigureCanvas):
         self.setMinimumHeight(230)
 
     def update_traces(self, state, times: np.ndarray, fps: float,
-                      cursor_t: float | None = None) -> None:
-        """Plot the traces; ``cursor_t`` (video s) draws a vertical scrub bar."""
+                      video_cursor_t: float | None = None,
+                      mocap_cursor_t: float | None = None) -> None:
+        """Plot the traces; ``video_cursor_t``/``mocap_cursor_t`` (video s)
+        draw dashed vertical bars for the video and mocap scrub sliders."""
         self.fig.clear()
         ax = self.fig.add_subplot(111)
         any_line = False
@@ -273,15 +275,20 @@ class TracesCanvas(FigureCanvas):
             ax.step(t_m + state["offset"], m + 1.5, color="tab:red", lw=1.2,
                     where="post", label="mocap binary (+1.5)")
             any_line = True
+        if video_cursor_t is not None:
+            ax.axvline(video_cursor_t, color="tab:blue", ls="--", lw=1.2,
+                       alpha=0.7, label="video scrub")
+            any_line = True
+        if mocap_cursor_t is not None:
+            ax.axvline(mocap_cursor_t, color="tab:purple", ls="--", lw=1.2,
+                       alpha=0.7, label="mocap scrub")
+            any_line = True
         ax.set_xlabel("video time (s)")
         ax.set_ylabel("signal")
-        ax.set_title(f"offset = {state['offset']:.3f} s   "
-                     "(video_time = mocap_time + offset)  -  drag the scrub "
-                     "slider; align the pulses with Offset fine-tune")
+        ax.set_title("move the video + mocap scrub sliders to line their "
+                     "bars up on the pulses, then 'Set offset from bars'")
         if any_line:
             ax.legend(loc="upper right", fontsize=8)
-        if cursor_t is not None:
-            ax.axvline(cursor_t, color="gray", ls="--", lw=1.2, alpha=0.9)
         ax.grid(alpha=0.3)
         self.fig.tight_layout()
         self.draw_idle()
@@ -313,7 +320,8 @@ class MainWindow(QMainWindow):
         self._crop_oy = 0
         self._mocap2d_map = None    # pixel->mm map of the last 2D mocap render
         self._box_draw = []         # clicked corners (X, Y mm) while box-drawing
-        self._cursor_t = 0.0        # current sync-scrub position (video s)
+        self._disp_vi = None        # sync-scrub display override (None = follow slider)
+        self._disp_mi = None
 
         self._build_ui()
 
@@ -435,7 +443,8 @@ class MainWindow(QMainWindow):
         self.state.pop("zoom_focus", None)
         self._box_draw = []
         self._mocap2d_map = None
-        self._cursor_t = 0.0
+        self._disp_vi = None
+        self._disp_mi = None
 
         self._render_canvas()
         self._update_video_views()
@@ -586,7 +595,7 @@ class MainWindow(QMainWindow):
         scrub_row = QHBoxLayout()
         self.video_scrub = QSlider(Qt.Horizontal)
         self.video_scrub.setRange(0, 0)
-        self.video_scrub.valueChanged.connect(self._update_video_views)
+        self.video_scrub.valueChanged.connect(self._on_video_scrub_change)
         scrub_row.addWidget(self.video_scrub, 1)
         self.video_frame_info = QLabel("frame -")
         scrub_row.addWidget(self.video_frame_info)
@@ -643,7 +652,7 @@ class MainWindow(QMainWindow):
         mscrub_row = QHBoxLayout()
         self.mocap_scrub = QSlider(Qt.Horizontal)
         self.mocap_scrub.setRange(0, 0)
-        self.mocap_scrub.valueChanged.connect(self._update_mocap_views)
+        self.mocap_scrub.valueChanged.connect(self._on_mocap_scrub_change)
         mscrub_row.addWidget(self.mocap_scrub, 1)
         self.mocap_frame_info = QLabel("frame -")
         mscrub_row.addWidget(self.mocap_frame_info)
@@ -710,6 +719,9 @@ class MainWindow(QMainWindow):
         reset_off = QPushButton("Reset offset")
         reset_off.clicked.connect(lambda: self.offset_spin.setValue(0.0))
         ctrl.addWidget(reset_off)
+        bars_btn = QPushButton("Set offset from bars")
+        bars_btn.clicked.connect(self._on_offset_from_bars)
+        ctrl.addWidget(bars_btn)
         ctrl.addWidget(QLabel("Sync scrub:"))
         self.sync_scrub = QSlider(Qt.Horizontal)
         self.sync_scrub.setRange(0, 0)
@@ -861,7 +873,8 @@ class MainWindow(QMainWindow):
     def _update_video_views(self):
         if FRAME_ARR is None:
             return
-        idx = self.video_scrub.value()
+        idx = (self._disp_vi if self._disp_vi is not None
+               else self.video_scrub.value())
         bgr, ox, oy = self._render_video_bgr(idx)
         self._crop_ox, self._crop_oy = ox, oy
         src_h, src_w = bgr.shape[:2]
@@ -878,7 +891,8 @@ class MainWindow(QMainWindow):
     def _update_mocap_views(self):
         if not MOCAP:
             return
-        midx = self.mocap_scrub.value()
+        midx = (self._disp_mi if self._disp_mi is not None
+                else self.mocap_scrub.value())
         box = self._box_arrays()
         self.mocap3d_view.setArray(render_mocap_3d(MOCAP, midx, box))
         img2, info = render_mocap_2d(MOCAP, midx, "top", box,
@@ -1167,29 +1181,60 @@ class MainWindow(QMainWindow):
         self.sync_info.setText(
             f"Saved output/sync.json  offset={self.state['offset']:.3f} s")
 
+    def _on_video_scrub_change(self, _v: int):
+        """Video scrub slider moved: take over from any sync-scrub display
+        override and move the video bar on the plot."""
+        self._disp_vi = None
+        self._update_video_views()
+        self._refresh_traces()
+
+    def _on_mocap_scrub_change(self, _v: int):
+        """Mocap scrub slider moved: take over from any sync-scrub display
+        override and move the mocap bar on the plot."""
+        self._disp_mi = None
+        self._update_mocap_views()
+        self._refresh_traces()
+
     def _refresh_traces(self):
-        """Redraw the traces plot with the current scrub cursor."""
+        """Redraw the traces plot with the two scrub cursor bars (they track
+        the video + mocap scrub sliders, NOT the sync scrub)."""
+        vt = mt = None
+        if FRAME_ARR is not None and len(TIMES):
+            vt = float(TIMES[self.video_scrub.value()])
+        if MOCAP:
+            mt = self.mocap_scrub.value() / FPS_M + self.state["offset"]
         self.traces.update_traces(self.state, TIMES, FPS_M,
-                                  cursor_t=self._cursor_t)
+                                  video_cursor_t=vt, mocap_cursor_t=mt)
+
+    def _on_offset_from_bars(self):
+        """Set offset = (video bar time) - (mocap bar time): line the two
+        bars up on the same blink, click this, and the sync is locked."""
+        if FRAME_ARR is None or not MOCAP:
+            self.sync_info.setText("Load data first (tab 0).")
+            return
+        tv = float(TIMES[self.video_scrub.value()])
+        tm = self.mocap_scrub.value() / FPS_M
+        self.offset_spin.setValue(tv - tm)
+        self.sync_info.setText(
+            f"Offset set from bars: video {tv:.3f}s - mocap {tm:.3f}s = "
+            f"{tv - tm:.3f} s. The mocap (purple) bar should now sit on the "
+            f"video (blue) bar - use the sync scrub to verify.")
 
     def _on_sync_scrub(self, frame: int):
-        """Drag the sync scrub: move BOTH viewers, draw the cursor bar."""
+        """Drag the sync scrub: move BOTH viewers in sync (via the offset)
+        WITHOUT moving the video/mocap scrub sliders - those hold your manual
+        alignment reference and their bars stay put."""
         if FRAME_ARR is None or not len(TIMES):
             return
         vi = max(0, min(int(frame), N_VID - 1))
         t_video = float(TIMES[vi])
-        self._cursor_t = t_video
         self.sync_scrub_label.setText(f"{t_video:.2f}s")
         t_m = t_video - self.state["offset"]          # mapped mocap time
         mi = int(round(t_m * FPS_M))
         clamped = mi < 0 or mi >= N_MOC
         mi = max(0, min(mi, N_MOC - 1))
-        self.video_scrub.blockSignals(True)
-        self.video_scrub.setValue(vi)
-        self.video_scrub.blockSignals(False)
-        self.mocap_scrub.blockSignals(True)
-        self.mocap_scrub.setValue(mi)
-        self.mocap_scrub.blockSignals(False)
+        self._disp_vi = vi
+        self._disp_mi = mi
         self._update_video_views()
         self._update_mocap_views()
         if clamped:
@@ -1202,7 +1247,6 @@ class MainWindow(QMainWindow):
             self.mocap_frame_info.setText(
                 f"frame {mi}/{max(N_MOC - 1, 0)}  t={t_m:.3f}s "
                 f"(video {t_video:.2f}s)")
-        self._refresh_traces()
 
     # ==================================================================
     # Tab 3 handlers

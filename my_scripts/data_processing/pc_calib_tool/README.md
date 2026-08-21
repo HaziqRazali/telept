@@ -71,12 +71,18 @@ on this machine they are auto-loaded on start.
    3D box by **clicking 2 corners on the 2D top view** (X–Y rectangle; the Z
    center and ±half come from the box spinboxes), or use *Auto-find LED* →
    presence trace.  Both binary traces are plotted on a **shared axis
-   starting at 0**; drag the **sync scrub slider** to move the RGB + C3D
-   views together (a dashed **vertical cursor** shows the scrub position on
-   the plot), and nudge **Offset fine-tune** (or *Invert/Reset offset*) until
-   the green and red pulses line up — that is your sync.  *Save sync* writes
-   it.  The mocap axes are locked to the whole recording, so the view
-   doesn't rescale while scrubbing.
+   starting at 0**.  Then align by eye:
+   * the **video scrub slider** moves the RGB view and has a **blue dashed
+     bar** on the plot; the **mocap scrub slider** moves the C3D view and
+     has a **purple dashed bar** — move them independently until each bar
+     sits on the corresponding blink.
+   * click **Set offset from bars** → `offset = video_bar − mocap_bar` and
+     the purple bar lands on the blue bar (the sync is locked).
+   * the **sync scrub** scrubs **both** views together (via the offset) to
+     visually verify correctness — it deliberately does **not** move the two
+     alignment sliders.
+   * nudge **Offset fine-tune** (or *Invert/Reset offset*) to perfect it,
+     then *Save sync*.  The mocap axes are locked to the whole recording.
 3. **Trim** — One shared start/end (video seconds) applied to both streams.
 4. **Calibrate** — Runs solvePnP (board pose per frame, intrinsics from the
    same video) + Umeyama fit with iterative outlier rejection → saves
