@@ -1127,9 +1127,12 @@ class MainWindow(QMainWindow):
                 self.state.get("mocap_bin") is not None:
             extra = self._trace_warnings()
             if extra:
-                self.sync_info.setText(
-                    "Threshold updated.\n\n" +
-                    "\n".join("  ! " + w for w in extra))
+                msg = "Threshold updated.\n\n" + \
+                    "\n".join("  ! " + w for w in extra)
+            else:
+                msg = (f"Threshold updated to {v}. Video binary now toggles "
+                       f"(LED on/off detected) - ready for 'Auto-sync'.")
+            self.sync_info.setText(msg)
 
     def _on_auto_sync(self):
         if self.state["video_bin"] is None or self.state["mocap_bin"] is None:
