@@ -111,7 +111,7 @@ def build_good_pairs(
         mi = mocap_index_for_video_time(video_times[vi], offset, mocap["fps"])
         if mi < 0 or mi >= mocap["n_frames"]:
             continue
-        if not all(mocap["presence"][mi, j] for j in marker_idx):
+        if not all(mocap["presence"][j, mi] for j in marker_idx):
             continue
         pairs.append({"video_idx": vi, "corners": corners, "mocap_idx": mi})
 
