@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ROM Measure — 2D joint angle annotation</title>
+<style>
+  :root { --accent:#2563eb; --bg:#0f172a; --panel:#1e293b; --text:#e2e8f0; --muted:#94a3b8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, sans-serif; background:var(--bg);
+         color:var(--text); display:flex; height:100vh; }
+  #login { position:fixed; inset:0; background:rgba(0,0,0,.7); display:none;
+           align-items:center; justify-content:center; z-index:50; }
+  #login.show { display:flex; }
+  .card { background:var(--panel); padding:24px; border-radius:12px; width:320px; }
+  .card h2 { margin-top:0; }
+  input, select, button { font:inherit; }
+  button { background:var(--accent); color:#fff; border:0; padding:6px 12px;
+           border-radius:6px; cursor:pointer; }
+  button.secondary { background:#334155; }
+  input, select { background:#0f172a; color:var(--text); border:1px solid #334155;
+                  padding:6px 8px; border-radius:6px; width:100%; margin:4px 0; }
+  #sidebar { width:300px; min-width:300px; background:var(--panel);
+             border-right:1px solid #334155; display:flex; flex-direction:column;
+             padding:12px; gap:8px; overflow-y:auto; }
+  #imageList { flex:1; overflow-y:auto; }
+  .img-item { display:flex; align-items:center; gap:8px; padding:6px 8px;
+              border-radius:6px; cursor:pointer; }
+  .img-item:hover { background:#334155; }
+  .img-item.active { background:var(--accent); }
+  .img-item .badge { margin-left:auto; font-size:12px; color:var(--muted); }
+  .img-item.annotated .badge { color:#4ade80; }
+  #main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+  #toolbar { display:flex; gap:8px; padding:8px 12px; border-bottom:1px solid #334155;
+             align-items:center; flex-wrap:wrap; }
+  #canvasWrap { flex:1; overflow:auto; display:flex; align-items:center;
+                justify-content:center; padding:12px; }
+  #stage { position:relative; }
+  #stage img { display:block; max-width:100%; max-height:calc(100vh - 120px); }
+  #stage svg { position:absolute; inset:0; width:100%; height:100%; touch-action:none; }
+  .pt { fill:#f43f5e; stroke:#fff; stroke-width:2; cursor:move; }
+  .ln { stroke:#fbbf24; stroke-width:2; }
+  .arc { fill:none; stroke:#22d3ee; stroke-width:2; }
+  .lbl { fill:#fff; font-size:18px; font-weight:600; paint-order:stroke;
+         stroke:#0f172a; stroke-width:3px; pointer-events:none; }
+  .ang { fill:#22d3ee; font-size:20px; font-weight:700; paint-order:stroke;
+         stroke:#0f172a; stroke-width:3px; pointer-events:none; }
+  #right { width:340px; min-width:340px; background:var(--panel);
+           border-left:1px solid #334155; padding:12px; overflow-y:auto;
+           display:flex; flex-direction:column; gap:12px; }
+  .row { display:flex; gap:6px; align-items:center; }
+  .row label { width:70px; color:var(--muted); font-size:13px; }
+  .row input, .row select { margin:2px 0; }
+  .angle-card { border:1px solid #334155; border-radius:8px; padding:10px; }
+  .angle-card .deg { font-size:22px; font-weight:700; color:#22d3ee; }
+  .del { background:#b91c1c; }
+  h3 { margin:8px 0 4px; font-size:13px; text-transform:uppercase; color:var(--muted);
+       letter-spacing:.05em; }
+  .hint { color:var(--muted); font-size:12px; }
+  #statusBanner {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    padding: 14px 24px; border-radius: 10px; font-size: 17px; font-weight: 600;
+    z-index: 60; box-shadow: 0 10px 30px rgba(0,0,0,.5); display: none;
+    max-width: min(92vw, 760px); text-align: center; line-height: 1.4;
+  }
+  #statusBanner.saved   { background:#14532d; color:#bbf7d0; border:1px solid #22c55e; }
+  #statusBanner.unsaved { background:#713f12; color:#fde68a; border:1px solid #f59e0b; }
+  #statusBanner.failed  { background:#7f1d1d; color:#fecaca; border:1px solid #ef4444; }
+  #statusBanner .path { font-size:13px; font-family:ui-monospace,SFMono-Regular,monospace;
+    opacity:.85; word-break:break-all; margin-top:4px; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="card">
+    <h2>ROM Measure</h2>
+    <p class="hint">Enter a username (and password if set). Annotations are saved per username.</p>
+    <input id="user" type="text" placeholder="username" autocomplete="username"
+           onkeydown="if(event.key==='Enter')document.getElementById('pass').focus()">
+    <input id="pass" type="password" placeholder="password" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="row" style="justify-content:flex-end; margin-top:8px;">
+      <button class="secondary" onclick="location.reload()">Cancel</button>
+      <button onclick="doLogin()">Log in</button>
+    </div>
+  </div>
+</div>
+
+<div id="statusBanner"></div>
+
+<aside id="sidebar">
+  <h2 style="margin:4px 0;">ROM Measure</h2>
+  <div class="row">
+    <button onclick="document.getElementById('fileInput').click()">⬆ Upload images</button>
+    <button class="secondary" onclick="loadImages()">↻</button>
+    <input id="fileInput" type="file" accept="image/*" multiple hidden
+           onchange="uploadFiles(this.files)">
+  </div>
+  <div class="hint" id="uploadStatus"></div>
+  <div id="imageList"></div>
+</aside>
+
+<main id="main">
+  <div id="toolbar">
+    <button onclick="loadImages()">Refresh</button>
+    <button class="secondary" onclick="exportCSV()">⬇ Export CSV</button>
+    <span class="hint" style="margin-left:auto;">Logged in as <b id="currentUser"></b></span>
+    <button class="secondary" onclick="doLogout()">Log out</button>
+  </div>
+  <div id="canvasWrap">
+    <div id="stage">
+      <img id="img" alt="" style="display:none;">
+      <svg id="svg"></svg>
+    </div>
+  </div>
+</main>
+
+<aside id="right">
+  <div>
+    <h3>Points</h3>
+    <p class="hint">Click the image to add points — your first 3 points automatically compute an angle.</p>
+    <div id="pointList"></div>
+  </div>
+  <div>
+    <h3>Angles</h3>
+    <p class="hint">Your first 3 points auto-create an angle (middle point = joint). Add more manually if needed.</p>
+    <div id="angleList"></div>
+    <button id="addAngleBtn" onclick="addAngleForm()" style="margin-top:6px;">＋ Add angle</button>
+  </div>
+</aside>
+
+<script>
+const $ = s => document.querySelector(s);
+const svg = $('#svg'), img = $('#img');
+const svgNS = 'http://www.w3.org/2000/svg';
+
+let current = null;          // current image filename
+let points = {};             // label -> {x,y} (natural pixels)
+let angles = [];             // {name, vertex, prox, dist, report180, interior_deg, reported_deg}
+let dirty = false;
+let me = '';                 // logged-in username
+let drag = null, dragJustEnded = false, saveTimer = null;
+
+/* ---------------- geometry ---------------- */
+function computeAngle(prox, vertex, dist) {
+  const a = points[prox], b = points[vertex], c = points[dist];
+  if (!a || !b || !c) return null;
+  const v1 = {x: a.x - b.x, y: a.y - b.y};
+  const v2 = {x: c.x - b.x, y: c.y - b.y};
+  const dot = v1.x * v2.x + v1.y * v2.y;
+  const m1 = Math.hypot(v1.x, v1.y), m2 = Math.hypot(v2.x, v2.y);
+  if (m1 === 0 || m2 === 0) return null;
+  let cos = dot / (m1 * m2);
+  cos = Math.max(-1, Math.min(1, cos));
+  return Math.acos(cos) * 180 / Math.PI;
+}
+function recomputeAngle(a) {
+  const deg = computeAngle(a.prox, a.vertex, a.dist);
+  a.interior_deg = deg;
+  a.reported_deg = deg === null ? null : (a.report180 ? 180 - deg : deg);
+}
+
+/* ---------------- API ---------------- */
+async function api(path, opts = {}) {
+  const res = await fetch(path, opts);
+  if (res.status === 401) { $('#login').classList.add('show'); throw new Error('unauthorized'); }
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+async function doLogin() {
+  const r = await fetch('/api/login', { method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({username: $('#user').value, password: $('#pass').value}) });
+  if (r.ok) {
+    const j = await r.json();
+    me = j.user || $('#user').value.trim();
+    $('#currentUser').textContent = me;
+    $('#login').classList.remove('show');
+    $('#user').value=''; $('#pass').value='';
+    loadImages();
+  }
+  else alert('Wrong username/password');
+}
+async function doLogout() { await fetch('/api/logout', {method:'POST'}); location.reload(); }
+
+async function loadImages() {
+  const data = await api('/api/images');
+  const list = $('#imageList');
+  list.innerHTML = '';
+  for (const it of data.images) {
+    const d = document.createElement('div');
+    d.className = 'img-item' + (it.annotated ? ' annotated' : '') +
+                  (it.name === current ? ' active' : '');
+    d.innerHTML = `<span>${escapeHtml(it.name)}</span><span class="badge">${it.annotated ? '✓' : ''}</span>`;
+    d.onclick = () => selectImage(it.name);
+    list.appendChild(d);
+  }
+  if (!current && data.images.length) selectImage(data.images[0].name);
+}
+
+async function selectImage(name) {
+  await saveIfDirty();
+  current = name;
+  const anno = await api('/api/annotation/' + encodeURIComponent(name));
+  points = anno.points || {};
+  angles = anno.angles || [];
+  img.src = '/api/image/' + encodeURIComponent(name);
+  img.onload = () => {
+    img.style.display = 'block';
+    svg.setAttribute('viewBox', `0 0 ${img.naturalWidth} ${img.naturalHeight}`);
+    render();
+  };
+  loadImages();
+}
+
+async function uploadFiles(files) {
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  $('#uploadStatus').textContent = `Uploading ${files.length} file(s)…`;
+  const r = await fetch('/api/upload', {method:'POST', body: fd});
+  if (!r.ok) { $('#uploadStatus').textContent = 'Upload failed'; return; }
+  const data = await r.json();
+  $('#uploadStatus').textContent = `Saved: ${data.saved.join(', ')}`;
+  $('#fileInput').value = '';
+  loadImages();
+}
+function exportCSV() { window.location = '/api/export.csv'; }
+
+/* ---------------- points ---------------- */
+svg.addEventListener('click', e => {
+  if (!current) return;
+  if (dragJustEnded) { dragJustEnded = false; return; }
+  const rect = svg.getBoundingClientRect();
+  const vb = svg.viewBox.baseVal;
+  const x = (e.clientX - rect.left) * vb.width / rect.width;
+  const y = (e.clientY - rect.top) * vb.height / rect.height;
+  let i = 1, label = 'P' + i;
+  while (points[label]) { i++; label = 'P' + i; }
+  points[label] = {x, y};
+  autoAngleIfFirst3();
+  markDirty(); render();
+});
+
+// If there are exactly 3 points and no angle yet, auto-create one
+// (vertex = the middle/2nd point).
+function autoAngleIfFirst3() {
+  if (angles.length !== 0) return;
+  const keys = Object.keys(points);
+  if (keys.length !== 3) return;
+  angles.push({name:'', vertex: keys[1], prox: keys[0], dist: keys[2],
+               report180:true, interior_deg:null, reported_deg:null});
+  recomputeAngle(angles[0]);
+}
+function movePoint(label, x, y) {
+  points[label] = {x, y};
+  markDirty(); render();
+}
+function deletePoint(label) {
+  delete points[label];
+  angles = angles.filter(a => a.prox!==label && a.vertex!==label && a.dist!==label);
+  markDirty(); render();
+}
+function renamePoint(old, neu) {
+  neu = neu.trim();
+  if (!neu || neu === old) { render(); return; }
+  if (points[neu]) { alert(`Point "${neu}" already exists`); render(); return; }
+  points[neu] = points[old]; delete points[old];
+  for (const a of angles) {
+    if (a.prox === old) a.prox = neu;
+    if (a.vertex === old) a.vertex = neu;
+    if (a.dist === old) a.dist = neu;
+  }
+  markDirty(); render();
+}
+
+/* ---------------- angles ---------------- */
+function addAngleForm() {
+  angles.push({name:'', vertex:'', prox:'', dist:'', report180:true,
+               interior_deg:null, reported_deg:null});
+  markDirty(); render();
+}
+function updateAngle(i, key, val) {
+  angles[i][key] = val;
+  recomputeAngle(angles[i]);
+  markDirty(); render();
+}
+function deleteAngle(i) { angles.splice(i,1); markDirty(); render(); }
+
+/* ---------------- rendering ---------------- */
+function render() {
+  angles.forEach(recomputeAngle);
+
+  const pl = $('#pointList'); pl.innerHTML = '';
+  for (const label of Object.keys(points).sort()) {
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<span style="width:14px;height:14px;border-radius:50%;
+        background:#f43f5e;display:inline-block;"></span>
+      <input value="${escapeHtml(label)}" style="flex:1;"
+        onchange="renamePoint('${escapeHtml(label)}', this.value)">`;
+    const del = document.createElement('button'); del.className='del'; del.textContent='✕';
+    del.onclick = () => deletePoint(label);
+    row.appendChild(del); pl.appendChild(row);
+  }
+
+  const al = $('#angleList'); al.innerHTML = '';
+  if (angles.length === 0) {
+    const keys = Object.keys(points);
+    if (keys.length >= 3) {
+      const btn = document.createElement('button');
+      btn.textContent = `⚡ Compute angle from ${keys[0]} → ${keys[1]} → ${keys[2]}`;
+      btn.style.marginBottom = '8px';
+      btn.onclick = () => {
+        angles.push({name:'', vertex: keys[1], prox: keys[0], dist: keys[2],
+                     report180:true, interior_deg:null, reported_deg:null});
+        recomputeAngle(angles[0]);
+        markDirty(); render();
+      };
+      al.appendChild(btn);
+    }
+  }
+  angles.forEach((a, i) => {
+    const labels = Object.keys(points).sort();
+    const opts = l => `<option value="">— pick —</option>` + labels.map(x =>
+      `<option value="${escapeHtml(x)}" ${x===l?'selected':''}>${escapeHtml(x)}</option>`).join('');
+    const card = document.createElement('div'); card.className = 'angle-card';
+    card.innerHTML = `
+      <div class="row"><label>Name</label><input value="${escapeHtml(a.name)}"
+        placeholder="e.g. elbow flexion" onchange="updateAngle(${i},'name',this.value)"></div>
+      <div class="row"><label>Proximal</label><select onchange="updateAngle(${i},'prox',this.value)">${opts(a.prox)}</select></div>
+      <div class="row"><label>Vertex</label><select onchange="updateAngle(${i},'vertex',this.value)">${opts(a.vertex)}</select></div>
+      <div class="row"><label>Distal</label><select onchange="updateAngle(${i},'dist',this.value)">${opts(a.dist)}</select></div>
+      <div class="row"><label>180−θ</label><input type="checkbox" ${a.report180?'checked':''}
+        onchange="updateAngle(${i},'report180',this.checked)"></div>
+      <div class="row"><span class="deg">${a.reported_deg===null?'—':a.reported_deg.toFixed(1)}°</span>
+        <span class="hint">${a.interior_deg===null?'':`interior ${a.interior_deg.toFixed(1)}°`}</span>
+        <button class="del" style="margin-left:auto;" onclick="deleteAngle(${i})">✕</button></div>`;
+    al.appendChild(card);
+  });
+
+  svg.innerHTML = '';
+  if (!current) return;
+  for (const a of angles) {
+    if (!points[a.prox] || !points[a.vertex] || !points[a.dist]) continue;
+    const b = points[a.vertex];
+    const mkLine = (to) => {
+      const l = document.createElementNS(svgNS,'line');
+      l.setAttribute('class','ln');
+      l.setAttribute('x1',b.x); l.setAttribute('y1',b.y);
+      l.setAttribute('x2',to.x); l.setAttribute('y2',to.y);
+      svg.appendChild(l);
+    };
+    mkLine(points[a.prox]); mkLine(points[a.dist]);
+    const r = 40;
+    const a1 = Math.atan2(points[a.prox].y-b.y, points[a.prox].x-b.x);
+    const a2 = Math.atan2(points[a.dist].y-b.y, points[a.dist].x-b.x);
+    let sweep = a2 - a1;
+    while (sweep > Math.PI) sweep -= 2*Math.PI;
+    while (sweep < -Math.PI) sweep += 2*Math.PI;
+    const x1 = b.x + r*Math.cos(a1), y1 = b.y + r*Math.sin(a1);
+    const x2 = b.x + r*Math.cos(a1+sweep), y2 = b.y + r*Math.sin(a1+sweep);
+    const arc = document.createElementNS(svgNS,'path');
+    arc.setAttribute('class','arc');
+    arc.setAttribute('d', `M ${x1} ${y1} A ${r} ${r} 0 ${Math.abs(sweep)>Math.PI?1:0} ${sweep<0?0:1} ${x2} ${y2}`);
+    svg.appendChild(arc);
+    const ang = document.createElementNS(svgNS,'text');
+    ang.setAttribute('class','ang');
+    ang.setAttribute('x', b.x+10); ang.setAttribute('y', b.y-10);
+    ang.textContent = `${a.reported_deg===null?'—':a.reported_deg.toFixed(1)}°`;
+    svg.appendChild(ang);
+  }
+  for (const label of Object.keys(points)) {
+    const p = points[label];
+    const c = document.createElementNS(svgNS,'circle');
+    c.setAttribute('class','pt');
+    c.setAttribute('cx',p.x); c.setAttribute('cy',p.y); c.setAttribute('r',8);
+    c.dataset.label = label;
+    c.addEventListener('pointerdown', startDrag);
+    svg.appendChild(c);
+    const t = document.createElementNS(svgNS,'text');
+    t.setAttribute('class','lbl');
+    t.setAttribute('x',p.x+12); t.setAttribute('y',p.y-8);
+    t.textContent = label;
+    svg.appendChild(t);
+  }
+}
+
+/* dragging */
+function startDrag(e) {
+  e.preventDefault();
+  drag = { label: e.currentTarget.dataset.label, vb: svg.viewBox.baseVal };
+  svg.setPointerCapture(e.pointerId);
+}
+svg.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const rect = svg.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * drag.vb.width / rect.width;
+  const y = (e.clientY - rect.top) * drag.vb.height / rect.height;
+  movePoint(drag.label, Math.max(0,Math.min(drag.vb.width,x)),
+                        Math.max(0,Math.min(drag.vb.height,y)));
+});
+svg.addEventListener('pointerup', () => { if (drag) dragJustEnded = true; drag = null; });
+
+/* ---------------- save ---------------- */
+let statusTimer = null;
+function showStatus(kind, msg, path) {
+  const b = $('#statusBanner');
+  b.className = kind;
+  b.innerHTML = msg + (path ? `<div class="path">${escapeHtml(path)}</div>` : '');
+  b.style.display = 'block';
+  clearTimeout(statusTimer);
+  if (kind === 'saved') statusTimer = setTimeout(() => { b.style.display = 'none'; }, 6000);
+}
+function markDirty() {
+  dirty = true;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 800);
+  showStatus('unsaved', 'Unsaved changes…');
+}
+async function save() {
+  if (!current) return;
+  const r = await fetch('/api/annotation/' + encodeURIComponent(current), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({points, angles}) });
+  const j = await r.json().catch(() => ({}));
+  if (r.ok) {
+    dirty = false;
+    showStatus('saved', '✅ Saved', j.path || '');
+  } else {
+    showStatus('failed', '❌ Save failed');
+    dirty = true;
+  }
+}
+async function saveIfDirty() {
+  if (!dirty) return;
+  clearTimeout(saveTimer);
+  await save();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ---------------- init ---------------- */
+loadImages().catch(() => {});
+</script>
+</body>
+</html>
