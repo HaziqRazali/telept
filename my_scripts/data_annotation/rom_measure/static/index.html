@@ -3,447 +3,193 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ROM Measure — 2D joint angle annotation</title>
+<title>ROM Measure - Blind RGBD annotation</title>
 <style>
-  :root { --accent:#2563eb; --bg:#0f172a; --panel:#1e293b; --text:#e2e8f0; --muted:#94a3b8; }
+  :root { --bg:#111827; --panel:#1f2937; --panel2:#273449; --line:#3b4a61; --text:#e5e7eb; --muted:#9ca3af; --accent:#38bdf8; --gold:#fbbf24; --danger:#f87171; --good:#4ade80; }
   * { box-sizing:border-box; }
-  body { margin:0; font-family: system-ui, -apple-system, sans-serif; background:var(--bg);
-         color:var(--text); display:flex; height:100vh; }
-  #login { position:fixed; inset:0; background:rgba(0,0,0,.7); display:none;
-           align-items:center; justify-content:center; z-index:50; }
+  html,body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.35 system-ui,-apple-system,sans-serif; overflow:hidden; }
+  button,input,select,textarea { font:inherit; }
+  button { border:1px solid var(--line); border-radius:5px; padding:6px 10px; color:var(--text); background:var(--panel2); cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.primary { color:#082f49; background:var(--accent); border-color:var(--accent); }
+  button.good { color:#052e16; background:var(--good); border-color:var(--good); }
+  button.danger { color:#450a0a; background:var(--danger); border-color:var(--danger); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  input,select,textarea { width:100%; color:var(--text); background:#111827; border:1px solid var(--line); border-radius:5px; padding:6px 8px; }
+  textarea { min-height:60px; resize:vertical; }
+  label { color:var(--muted); font-size:12px; }
+  .app { display:grid; grid-template-columns:260px minmax(0,1fr) 320px; height:100%; }
+  aside { min-width:0; padding:14px; background:var(--panel); overflow:auto; }
+  .tasks { border-right:1px solid var(--line); }
+  .inspector { border-left:1px solid var(--line); }
+  main { min-width:0; min-height:0; overflow:hidden; display:grid; grid-template-rows:auto 1fr auto; }
+  .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:10px 14px; border-bottom:1px solid var(--line); }
+  .toolbar .user { margin-left:auto; color:var(--muted); }
+  .section { border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:14px; }
+  h1,h2,h3 { margin:0 0 10px; } h1 { font-size:18px; } h2 { font-size:14px; } h3 { color:var(--muted); font-size:11px; letter-spacing:.08em; text-transform:uppercase; }
+  .muted { color:var(--muted); font-size:12px; }
+  .task-list { display:grid; gap:6px; margin-top:12px; }
+  .task-card { width:100%; padding:9px; text-align:left; display:grid; gap:3px; white-space:normal; }
+  .task-card.active { border-color:var(--accent); background:#164e63; }
+  .task-card.submitted { border-color:#a16207; }
+  .task-card.reviewed { border-color:#166534; }
+  .task-card small { color:var(--muted); }
+  .stage-wrap { min-width:0; min-height:0; overflow:auto; display:flex; align-items:center; justify-content:center; gap:18px; padding:18px; }
+  .stage-wrap.zoomed { justify-content:flex-start; }
+  .stage-wrap.vertical-overflow { align-items:flex-start; }
+  .frame-panel { min-width:0; flex:0 1 470px; display:grid; gap:6px; align-content:center; }
+  .frame-title { color:var(--muted); font-size:12px; text-align:center; }
+  .stage { position:relative; max-width:100%; line-height:0; }
+  .stage-wrap.pan-ready .stage { cursor:crosshair; }
+  .stage-wrap.panning .stage { cursor:grabbing; }
+  .stage.sized { max-width:none; flex:none; }
+  #stage.sized > img, #qaStage.sized > img { width:100%; height:100%; max-width:none; max-height:none; }
+  #rgb,#qaRgb { display:block; max-width:min(100%,900px); max-height:calc(100vh - 190px); width:auto; height:auto; }
+  #depth,#qaDepth { position:absolute; inset:0; display:none; width:100%; height:100%; opacity:.34; pointer-events:none; }
+  #svg,#qaSvg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; touch-action:none; }
+  .manual-point { fill:#f43f5e; stroke:#fff; stroke-width:2; cursor:grab; }
+  .manual-point.active { fill:var(--gold); }
+  .manual-label { fill:#fff; font-size:17px; font-weight:700; paint-order:stroke; stroke:#111827; stroke-width:4px; pointer-events:none; }
+  .pred-point { fill:none; stroke:#a78bfa; stroke-width:3; pointer-events:none; }
+  .pred-label { fill:#c4b5fd; font-size:14px; paint-order:stroke; stroke:#111827; stroke-width:3px; pointer-events:none; }
+  .framebar { display:flex; justify-content:center; gap:10px; align-items:center; padding:8px 14px; border-top:1px solid var(--line); }
+  .pose-controls { display:flex; gap:6px; align-items:center; }
+  .pose-controls button.active { border-color:var(--accent); background:#164e63; }
+  .zoom-controls { display:flex; gap:8px; align-items:center; margin-left:auto; }
+  .zoom-controls button { min-width:30px; padding:5px 8px; }
+  .reset-zoom { margin-left:8px; }
+  .toolbar .user { margin-left:8px; }
+  #zoomValue { min-width:48px; color:var(--muted); text-align:center; }
+  .point-row { display:grid; grid-template-columns:10px 1fr auto; gap:7px; align-items:center; margin:6px 0; }
+  .point-dot { width:10px; height:10px; border-radius:50%; background:var(--danger); }
+  .point-row.complete .point-dot { background:var(--good); }
+  .point-row button { padding:3px 7px; font-size:12px; }
+  .metric-value { font-size:27px; color:var(--accent); font-weight:700; margin:6px 0; }
+  .metric-value.invalid { color:var(--danger); }
+  .comparison { display:grid; gap:4px; margin:8px 0; }
+  .comparison .big { font-size:20px; font-weight:700; }
+  .comparison .difference { color:var(--gold); font-weight:700; }
+  .quality { display:grid; gap:6px; padding:9px; background:#172033; border:1px solid var(--line); border-radius:5px; }
+  .quality.good { border-color:#166534; }
+  .quality.bad { border-color:#991b1b; }
+  .review-panel { display:none; padding:10px; background:#172033; border:1px solid var(--gold); border-radius:5px; }
+  .review-panel.show { display:block; }
+  .review-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px; }
+  #login { position:fixed; inset:0; z-index:20; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.74); }
   #login.show { display:flex; }
-  .card { background:var(--panel); padding:24px; border-radius:12px; width:320px; }
-  .card h2 { margin-top:0; }
-  input, select, button { font:inherit; }
-  button { background:var(--accent); color:#fff; border:0; padding:6px 12px;
-           border-radius:6px; cursor:pointer; }
-  button.secondary { background:#334155; }
-  input, select { background:#0f172a; color:var(--text); border:1px solid #334155;
-                  padding:6px 8px; border-radius:6px; width:100%; margin:4px 0; }
-  #sidebar { width:300px; min-width:300px; background:var(--panel);
-             border-right:1px solid #334155; display:flex; flex-direction:column;
-             padding:12px; gap:8px; overflow-y:auto; }
-  #imageList { flex:1; overflow-y:auto; }
-  .img-item { display:flex; align-items:center; gap:8px; padding:6px 8px;
-              border-radius:6px; cursor:pointer; }
-  .img-item:hover { background:#334155; }
-  .img-item.active { background:var(--accent); }
-  .img-item .badge { margin-left:auto; font-size:12px; color:var(--muted); }
-  .img-item.annotated .badge { color:#4ade80; }
-  #main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-  #toolbar { display:flex; gap:8px; padding:8px 12px; border-bottom:1px solid #334155;
-             align-items:center; flex-wrap:wrap; }
-  #canvasWrap { flex:1; overflow:auto; display:flex; align-items:center;
-                justify-content:center; padding:12px; }
-  #stage { position:relative; }
-  #stage img { display:block; max-width:100%; max-height:calc(100vh - 120px); }
-  #stage svg { position:absolute; inset:0; width:100%; height:100%; touch-action:none; }
-  .pt { fill:#f43f5e; stroke:#fff; stroke-width:2; cursor:move; }
-  .ln { stroke:#fbbf24; stroke-width:2; }
-  .arc { fill:none; stroke:#22d3ee; stroke-width:2; }
-  .lbl { fill:#fff; font-size:18px; font-weight:600; paint-order:stroke;
-         stroke:#0f172a; stroke-width:3px; pointer-events:none; }
-  .ang { fill:#22d3ee; font-size:20px; font-weight:700; paint-order:stroke;
-         stroke:#0f172a; stroke-width:3px; pointer-events:none; }
-  #right { width:340px; min-width:340px; background:var(--panel);
-           border-left:1px solid #334155; padding:12px; overflow-y:auto;
-           display:flex; flex-direction:column; gap:12px; }
-  .row { display:flex; gap:6px; align-items:center; }
-  .row label { width:70px; color:var(--muted); font-size:13px; }
-  .row input, .row select { margin:2px 0; }
-  .angle-card { border:1px solid #334155; border-radius:8px; padding:10px; }
-  .angle-card .deg { font-size:22px; font-weight:700; color:#22d3ee; }
-  .del { background:#b91c1c; }
-  h3 { margin:8px 0 4px; font-size:13px; text-transform:uppercase; color:var(--muted);
-       letter-spacing:.05em; }
-  .hint { color:var(--muted); font-size:12px; }
-  #statusBanner {
-    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-    padding: 14px 24px; border-radius: 10px; font-size: 17px; font-weight: 600;
-    z-index: 60; box-shadow: 0 10px 30px rgba(0,0,0,.5); display: none;
-    max-width: min(92vw, 760px); text-align: center; line-height: 1.4;
-  }
-  #statusBanner.saved   { background:#14532d; color:#bbf7d0; border:1px solid #22c55e; }
-  #statusBanner.unsaved { background:#713f12; color:#fde68a; border:1px solid #f59e0b; }
-  #statusBanner.failed  { background:#7f1d1d; color:#fecaca; border:1px solid #ef4444; }
-  #statusBanner .path { font-size:13px; font-family:ui-monospace,SFMono-Regular,monospace;
-    opacity:.85; word-break:break-all; margin-top:4px; }
+  .login-card { width:min(340px,92vw); padding:22px; background:var(--panel); border:1px solid var(--line); border-radius:8px; }
+  #status { position:fixed; left:50%; bottom:18px; z-index:30; transform:translateX(-50%); display:none; max-width:min(90vw,760px); padding:10px 16px; border-radius:6px; background:#14532d; border:1px solid #22c55e; color:#dcfce7; }
+  #status.show { display:block; } #status.unsaved { background:#713f12; border-color:#f59e0b; color:#fef3c7; } #status.failed { background:#7f1d1d; border-color:#ef4444; color:#fee2e2; }
+  @media(max-width:1100px) { body { overflow:auto; } .app { grid-template-columns:230px minmax(0,1fr); min-height:100%; height:auto; } .inspector { grid-column:1/-1; border-left:0; border-top:1px solid var(--line); } main { min-height:650px; } }
+  @media(max-width:700px) { .app { display:block; } aside { border:0; border-bottom:1px solid var(--line); } main { min-height:580px; } .stage-wrap { display:grid; justify-items:center; } .frame-panel { width:100%; } .zoom-controls { margin-left:0; } }
 </style>
 </head>
 <body>
-
 <div id="login">
-  <div class="card">
-    <h2>ROM Measure</h2>
-    <p class="hint">Enter a username (and password if set). Annotations are saved per username.</p>
-    <input id="user" type="text" placeholder="username" autocomplete="username"
-           onkeydown="if(event.key==='Enter')document.getElementById('pass').focus()">
-    <input id="pass" type="password" placeholder="password" autocomplete="current-password"
-           onkeydown="if(event.key==='Enter')doLogin()">
-    <div class="row" style="justify-content:flex-end; margin-top:8px;">
-      <button class="secondary" onclick="location.reload()">Cancel</button>
-      <button onclick="doLogin()">Log in</button>
-    </div>
-  </div>
+  <form class="login-card" onsubmit="event.preventDefault(); doLogin();">
+    <h1>ROM Measure</h1>
+    <p class="muted">Blind RGBD annotation</p>
+    <div style="display:grid;gap:4px;margin:9px 0;"><label for="username">Username</label><input id="username" autocomplete="username" required></div>
+    <div style="display:grid;gap:4px;margin:9px 0;"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password"></div>
+    <button class="primary" type="submit">Log in</button>
+  </form>
 </div>
-
-<div id="statusBanner"></div>
-
-<aside id="sidebar">
-  <h2 style="margin:4px 0;">ROM Measure</h2>
-  <div class="row">
-    <button onclick="document.getElementById('fileInput').click()">⬆ Upload images</button>
-    <button class="secondary" onclick="loadImages()">↻</button>
-    <input id="fileInput" type="file" accept="image/*" multiple hidden
-           onchange="uploadFiles(this.files)">
-  </div>
-  <div class="hint" id="uploadStatus"></div>
-  <div id="imageList"></div>
-</aside>
-
-<main id="main">
-  <div id="toolbar">
-    <button onclick="loadImages()">Refresh</button>
-    <button class="secondary" onclick="exportCSV()">⬇ Export CSV</button>
-    <span class="hint" style="margin-left:auto;">Logged in as <b id="currentUser"></b></span>
-    <button class="secondary" onclick="doLogout()">Log out</button>
-  </div>
-  <div id="canvasWrap">
-    <div id="stage">
-      <img id="img" alt="" style="display:none;">
-      <svg id="svg"></svg>
+<div id="status"></div>
+<div class="app">
+  <aside class="tasks">
+    <h1>RGBD ROM</h1>
+    <p class="muted">Complete the assigned frames. MMPose appears only after you finish a blind annotation.</p>
+    <div style="display:flex;gap:6px;"><button onclick="loadTasks()">Refresh</button><button onclick="logout()">Log out</button></div>
+    <div id="taskList" class="task-list"></div>
+  </aside>
+  <main>
+    <div class="toolbar">
+      <strong id="taskTitle">No task selected</strong>
+      <span id="taskStatus" class="muted"></span>
+      <div class="zoom-controls"><button onclick="zoomOut()" title="Zoom out">-</button><span id="zoomValue">100%</span><button onclick="zoomIn()" title="Zoom in">+</button></div><button class="reset-zoom" onclick="resetZoom()">Reset zoom</button>
+      <span id="currentUser" class="user"></span>
     </div>
-  </div>
-</main>
-
-<aside id="right">
-  <div>
-    <h3>Points</h3>
-    <p class="hint">Click the image to add points — your first 3 points automatically compute an angle.</p>
-    <div id="pointList"></div>
-  </div>
-  <div>
-    <h3>Angles</h3>
-    <p class="hint">Your first 3 points auto-create an angle (middle point = joint). Add more manually if needed.</p>
-    <div id="angleList"></div>
-    <button id="addAngleBtn" onclick="addAngleForm()" style="margin-top:6px;">＋ Add angle</button>
-  </div>
-</aside>
-
+    <div class="stage-wrap">
+      <div class="frame-panel">
+        <div class="frame-title">Annotation frame</div>
+        <div id="stage" class="stage" title="Press Space to place a keypoint. Drag with the left or middle mouse button to pan"><img id="rgb" alt="RGB task frame"><img id="depth" alt="Depth overlay"><svg id="svg" aria-label="blind manual annotation"></svg></div>
+      </div>
+      <div id="qaPanel" class="frame-panel" style="display:none">
+        <div class="frame-title">MMPose QA frame (confidence >= 0.5)</div>
+        <div id="qaStage" class="stage" title="Drag with the left or middle mouse button to pan"><img id="qaRgb" alt="MMPose QA task frame"><img id="qaDepth" alt="MMPose QA depth overlay"><svg id="qaSvg" aria-label="MMPose estimate"></svg></div>
+      </div>
+    </div>
+    <div class="framebar"><span id="frameInfo" class="muted">Select a task</span><div id="poseControls" class="pose-controls" style="display:none"><button id="poseT1" onclick="selectPose('t1')">T1</button><button id="poseT2" onclick="selectPose('t2')">T2</button><span id="poseInfo" class="muted"></span></div><button onclick="toggleDepth()" id="depthButton">Show depth</button><button onclick="saveDraft()" id="draftButton">Save draft</button></div>
+  </main>
+  <aside class="inspector">
+    <section class="section"><h3>Step 1: task</h3><div id="taskInfo" class="muted">Choose an assigned task.</div><div id="taskPoseHint" class="muted"></div></section>
+    <section class="section"><h3>Step 2: blind annotation</h3><div class="muted">Place the required semantic points on the RGB frame. MMPose is hidden until submission.</div><button class="danger" style="margin-top:9px;width:100%;" onclick="resetKeypoints()" id="resetKeypointsButton" disabled>Reset all keypoints</button><div id="pointList"></div><div id="manualAngle" class="metric-value">-</div><div id="quality" class="quality"><span class="muted">No task selected.</span></div><button class="primary" style="margin-top:9px;width:100%;" onclick="finishAnnotation()" id="finishButton" disabled>Finish annotation</button></section>
+    <section id="reviewSection" class="section"><h3>Step 3: MMPose review</h3><div id="comparison" class="comparison"></div><div id="reviewPanel" class="review-panel"><div class="muted">The blind annotation is locked. Decide whether the MMPose estimate is acceptable.</div><div class="review-actions"><button class="good" onclick="submitReview('agree')">Agree</button><button class="danger" onclick="showDisagreement()">Disagree</button></div><div id="disagreementBox" style="display:none;margin-top:8px;"><div class="field"><label for="disagreementReason">Reason</label><textarea id="disagreementReason" placeholder="Optional explanation"></textarea></div><button class="danger" onclick="submitReview('disagree')">Submit disagreement</button></div></div><div id="reviewedMessage" class="muted"></div></section>
+    <section><h3>Frame notes</h3><label style="display:flex;gap:6px;align-items:center;"><input id="usable" type="checkbox" style="width:auto;" onchange="updateDraftMetadata()"> Usable</label><div style="display:grid;gap:4px;margin-top:8px;"><label for="notes">Notes</label><textarea id="notes" placeholder="Occlusion, uncertainty, or other note" onchange="updateDraftMetadata()"></textarea></div></section>
+  </aside>
+</div>
 <script>
-const $ = s => document.querySelector(s);
-const svg = $('#svg'), img = $('#img');
-const svgNS = 'http://www.w3.org/2000/svg';
+const $ = selector => document.querySelector(selector);
+const svg = $('#svg'); const rgb = $('#rgb'); const depth = $('#depth'); const qaSvg = $('#qaSvg'); const qaRgb = $('#qaRgb'); const qaDepth = $('#qaDepth');
+const stageWrap = document.querySelector('.stage-wrap'); const manualPanel = stage.parentElement; const qaPanel = $('#qaPanel');
+const MIN_ZOOM = 0.5; const MAX_ZOOM = 10; const ZOOM_STEP = 0.25;
+let tasks = []; let currentTask = null; let taskPayload = null; let entry = null; let activePose = 'frame'; let predictedPoints = {}; let comparison = null; let selectedPoint = null; let dirty = false; let saveTimer = null; let previewTimer = null; let zoom = 1; let baseStageSize = null; let drag = null; let pan = null; let panJustEnded = false; let spacePressed = false; let lastPointer = null; let requestNumber = 0;
 
-let current = null;          // current image filename
-let points = {};             // label -> {x,y} (natural pixels)
-let angles = [];             // {name, vertex, prox, dist, report180, interior_deg, reported_deg}
-let dirty = false;
-let me = '';                 // logged-in username
-let drag = null, dragJustEnded = false, saveTimer = null;
-
-/* ---------------- geometry ---------------- */
-function computeAngle(prox, vertex, dist) {
-  const a = points[prox], b = points[vertex], c = points[dist];
-  if (!a || !b || !c) return null;
-  const v1 = {x: a.x - b.x, y: a.y - b.y};
-  const v2 = {x: c.x - b.x, y: c.y - b.y};
-  const dot = v1.x * v2.x + v1.y * v2.y;
-  const m1 = Math.hypot(v1.x, v1.y), m2 = Math.hypot(v2.x, v2.y);
-  if (m1 === 0 || m2 === 0) return null;
-  let cos = dot / (m1 * m2);
-  cos = Math.max(-1, Math.min(1, cos));
-  return Math.acos(cos) * 180 / Math.PI;
-}
-function recomputeAngle(a) {
-  const deg = computeAngle(a.prox, a.vertex, a.dist);
-  a.interior_deg = deg;
-  a.reported_deg = deg === null ? null : (a.report180 ? 180 - deg : deg);
-}
-
-/* ---------------- API ---------------- */
-async function api(path, opts = {}) {
-  const res = await fetch(path, opts);
-  if (res.status === 401) { $('#login').classList.add('show'); throw new Error('unauthorized'); }
-  if (!res.ok) throw new Error(res.statusText);
-  return res.json();
-}
-async function doLogin() {
-  const r = await fetch('/api/login', { method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({username: $('#user').value, password: $('#pass').value}) });
-  if (r.ok) {
-    const j = await r.json();
-    me = j.user || $('#user').value.trim();
-    $('#currentUser').textContent = me;
-    $('#login').classList.remove('show');
-    $('#user').value=''; $('#pass').value='';
-    loadImages();
-  }
-  else alert('Wrong username/password');
-}
-async function doLogout() { await fetch('/api/logout', {method:'POST'}); location.reload(); }
-
-async function loadImages() {
-  const data = await api('/api/images');
-  const list = $('#imageList');
-  list.innerHTML = '';
-  for (const it of data.images) {
-    const d = document.createElement('div');
-    d.className = 'img-item' + (it.annotated ? ' annotated' : '') +
-                  (it.name === current ? ' active' : '');
-    d.innerHTML = `<span>${escapeHtml(it.name)}</span><span class="badge">${it.annotated ? '✓' : ''}</span>`;
-    d.onclick = () => selectImage(it.name);
-    list.appendChild(d);
-  }
-  if (!current && data.images.length) selectImage(data.images[0].name);
-}
-
-async function selectImage(name) {
-  await saveIfDirty();
-  current = name;
-  const anno = await api('/api/annotation/' + encodeURIComponent(name));
-  points = anno.points || {};
-  angles = anno.angles || [];
-  img.src = '/api/image/' + encodeURIComponent(name);
-  img.onload = () => {
-    img.style.display = 'block';
-    svg.setAttribute('viewBox', `0 0 ${img.naturalWidth} ${img.naturalHeight}`);
-    render();
-  };
-  loadImages();
-}
-
-async function uploadFiles(files) {
-  const fd = new FormData();
-  for (const f of files) fd.append('files', f);
-  $('#uploadStatus').textContent = `Uploading ${files.length} file(s)…`;
-  const r = await fetch('/api/upload', {method:'POST', body: fd});
-  if (!r.ok) { $('#uploadStatus').textContent = 'Upload failed'; return; }
-  const data = await r.json();
-  $('#uploadStatus').textContent = `Saved: ${data.saved.join(', ')}`;
-  $('#fileInput').value = '';
-  loadImages();
-}
-function exportCSV() { window.location = '/api/export.csv'; }
-
-/* ---------------- points ---------------- */
-svg.addEventListener('click', e => {
-  if (!current) return;
-  if (dragJustEnded) { dragJustEnded = false; return; }
-  const rect = svg.getBoundingClientRect();
-  const vb = svg.viewBox.baseVal;
-  const x = (e.clientX - rect.left) * vb.width / rect.width;
-  const y = (e.clientY - rect.top) * vb.height / rect.height;
-  let i = 1, label = 'P' + i;
-  while (points[label]) { i++; label = 'P' + i; }
-  points[label] = {x, y};
-  autoAngleIfFirst3();
-  markDirty(); render();
-});
-
-// If there are exactly 3 points and no angle yet, auto-create one
-// (vertex = the middle/2nd point).
-function autoAngleIfFirst3() {
-  if (angles.length !== 0) return;
-  const keys = Object.keys(points);
-  if (keys.length !== 3) return;
-  angles.push({name:'', vertex: keys[1], prox: keys[0], dist: keys[2],
-               report180:true, interior_deg:null, reported_deg:null});
-  recomputeAngle(angles[0]);
-}
-function movePoint(label, x, y) {
-  points[label] = {x, y};
-  markDirty(); render();
-}
-function deletePoint(label) {
-  delete points[label];
-  angles = angles.filter(a => a.prox!==label && a.vertex!==label && a.dist!==label);
-  markDirty(); render();
-}
-function renamePoint(old, neu) {
-  neu = neu.trim();
-  if (!neu || neu === old) { render(); return; }
-  if (points[neu]) { alert(`Point "${neu}" already exists`); render(); return; }
-  points[neu] = points[old]; delete points[old];
-  for (const a of angles) {
-    if (a.prox === old) a.prox = neu;
-    if (a.vertex === old) a.vertex = neu;
-    if (a.dist === old) a.dist = neu;
-  }
-  markDirty(); render();
-}
-
-/* ---------------- angles ---------------- */
-function addAngleForm() {
-  angles.push({name:'', vertex:'', prox:'', dist:'', report180:true,
-               interior_deg:null, reported_deg:null});
-  markDirty(); render();
-}
-function updateAngle(i, key, val) {
-  angles[i][key] = val;
-  recomputeAngle(angles[i]);
-  markDirty(); render();
-}
-function deleteAngle(i) { angles.splice(i,1); markDirty(); render(); }
-
-/* ---------------- rendering ---------------- */
-function render() {
-  angles.forEach(recomputeAngle);
-
-  const pl = $('#pointList'); pl.innerHTML = '';
-  for (const label of Object.keys(points).sort()) {
-    const row = document.createElement('div'); row.className = 'row';
-    row.innerHTML = `<span style="width:14px;height:14px;border-radius:50%;
-        background:#f43f5e;display:inline-block;"></span>
-      <input value="${escapeHtml(label)}" style="flex:1;"
-        onchange="renamePoint('${escapeHtml(label)}', this.value)">`;
-    const del = document.createElement('button'); del.className='del'; del.textContent='✕';
-    del.onclick = () => deletePoint(label);
-    row.appendChild(del); pl.appendChild(row);
-  }
-
-  const al = $('#angleList'); al.innerHTML = '';
-  if (angles.length === 0) {
-    const keys = Object.keys(points);
-    if (keys.length >= 3) {
-      const btn = document.createElement('button');
-      btn.textContent = `⚡ Compute angle from ${keys[0]} → ${keys[1]} → ${keys[2]}`;
-      btn.style.marginBottom = '8px';
-      btn.onclick = () => {
-        angles.push({name:'', vertex: keys[1], prox: keys[0], dist: keys[2],
-                     report180:true, interior_deg:null, reported_deg:null});
-        recomputeAngle(angles[0]);
-        markDirty(); render();
-      };
-      al.appendChild(btn);
-    }
-  }
-  angles.forEach((a, i) => {
-    const labels = Object.keys(points).sort();
-    const opts = l => `<option value="">— pick —</option>` + labels.map(x =>
-      `<option value="${escapeHtml(x)}" ${x===l?'selected':''}>${escapeHtml(x)}</option>`).join('');
-    const card = document.createElement('div'); card.className = 'angle-card';
-    card.innerHTML = `
-      <div class="row"><label>Name</label><input value="${escapeHtml(a.name)}"
-        placeholder="e.g. elbow flexion" onchange="updateAngle(${i},'name',this.value)"></div>
-      <div class="row"><label>Proximal</label><select onchange="updateAngle(${i},'prox',this.value)">${opts(a.prox)}</select></div>
-      <div class="row"><label>Vertex</label><select onchange="updateAngle(${i},'vertex',this.value)">${opts(a.vertex)}</select></div>
-      <div class="row"><label>Distal</label><select onchange="updateAngle(${i},'dist',this.value)">${opts(a.dist)}</select></div>
-      <div class="row"><label>180−θ</label><input type="checkbox" ${a.report180?'checked':''}
-        onchange="updateAngle(${i},'report180',this.checked)"></div>
-      <div class="row"><span class="deg">${a.reported_deg===null?'—':a.reported_deg.toFixed(1)}°</span>
-        <span class="hint">${a.interior_deg===null?'':`interior ${a.interior_deg.toFixed(1)}°`}</span>
-        <button class="del" style="margin-left:auto;" onclick="deleteAngle(${i})">✕</button></div>`;
-    al.appendChild(card);
-  });
-
-  svg.innerHTML = '';
-  if (!current) return;
-  for (const a of angles) {
-    if (!points[a.prox] || !points[a.vertex] || !points[a.dist]) continue;
-    const b = points[a.vertex];
-    const mkLine = (to) => {
-      const l = document.createElementNS(svgNS,'line');
-      l.setAttribute('class','ln');
-      l.setAttribute('x1',b.x); l.setAttribute('y1',b.y);
-      l.setAttribute('x2',to.x); l.setAttribute('y2',to.y);
-      svg.appendChild(l);
-    };
-    mkLine(points[a.prox]); mkLine(points[a.dist]);
-    const r = 40;
-    const a1 = Math.atan2(points[a.prox].y-b.y, points[a.prox].x-b.x);
-    const a2 = Math.atan2(points[a.dist].y-b.y, points[a.dist].x-b.x);
-    let sweep = a2 - a1;
-    while (sweep > Math.PI) sweep -= 2*Math.PI;
-    while (sweep < -Math.PI) sweep += 2*Math.PI;
-    const x1 = b.x + r*Math.cos(a1), y1 = b.y + r*Math.sin(a1);
-    const x2 = b.x + r*Math.cos(a1+sweep), y2 = b.y + r*Math.sin(a1+sweep);
-    const arc = document.createElementNS(svgNS,'path');
-    arc.setAttribute('class','arc');
-    arc.setAttribute('d', `M ${x1} ${y1} A ${r} ${r} 0 ${Math.abs(sweep)>Math.PI?1:0} ${sweep<0?0:1} ${x2} ${y2}`);
-    svg.appendChild(arc);
-    const ang = document.createElementNS(svgNS,'text');
-    ang.setAttribute('class','ang');
-    ang.setAttribute('x', b.x+10); ang.setAttribute('y', b.y-10);
-    ang.textContent = `${a.reported_deg===null?'—':a.reported_deg.toFixed(1)}°`;
-    svg.appendChild(ang);
-  }
-  for (const label of Object.keys(points)) {
-    const p = points[label];
-    const c = document.createElementNS(svgNS,'circle');
-    c.setAttribute('class','pt');
-    c.setAttribute('cx',p.x); c.setAttribute('cy',p.y); c.setAttribute('r',8);
-    c.dataset.label = label;
-    c.addEventListener('pointerdown', startDrag);
-    svg.appendChild(c);
-    const t = document.createElementNS(svgNS,'text');
-    t.setAttribute('class','lbl');
-    t.setAttribute('x',p.x+12); t.setAttribute('y',p.y-8);
-    t.textContent = label;
-    svg.appendChild(t);
-  }
-}
-
-/* dragging */
-function startDrag(e) {
-  e.preventDefault();
-  drag = { label: e.currentTarget.dataset.label, vb: svg.viewBox.baseVal };
-  svg.setPointerCapture(e.pointerId);
-}
-svg.addEventListener('pointermove', e => {
-  if (!drag) return;
-  const rect = svg.getBoundingClientRect();
-  const x = (e.clientX - rect.left) * drag.vb.width / rect.width;
-  const y = (e.clientY - rect.top) * drag.vb.height / rect.height;
-  movePoint(drag.label, Math.max(0,Math.min(drag.vb.width,x)),
-                        Math.max(0,Math.min(drag.vb.height,y)));
-});
-svg.addEventListener('pointerup', () => { if (drag) dragJustEnded = true; drag = null; });
-
-/* ---------------- save ---------------- */
-let statusTimer = null;
-function showStatus(kind, msg, path) {
-  const b = $('#statusBanner');
-  b.className = kind;
-  b.innerHTML = msg + (path ? `<div class="path">${escapeHtml(path)}</div>` : '');
-  b.style.display = 'block';
-  clearTimeout(statusTimer);
-  if (kind === 'saved') statusTimer = setTimeout(() => { b.style.display = 'none'; }, 6000);
-}
-function markDirty() {
-  dirty = true;
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(save, 800);
-  showStatus('unsaved', 'Unsaved changes…');
-}
-async function save() {
-  if (!current) return;
-  const r = await fetch('/api/annotation/' + encodeURIComponent(current), {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({points, angles}) });
-  const j = await r.json().catch(() => ({}));
-  if (r.ok) {
-    dirty = false;
-    showStatus('saved', '✅ Saved', j.path || '');
-  } else {
-    showStatus('failed', '❌ Save failed');
-    dirty = true;
-  }
-}
-async function saveIfDirty() {
-  if (!dirty) return;
-  clearTimeout(saveTimer);
-  await save();
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-/* ---------------- init ---------------- */
-loadImages().catch(() => {});
+function showStatus(kind,message,timeout=3500) { const node=$('#status'); node.className='show '+kind; node.textContent=message; clearTimeout(node.timer); if(timeout)node.timer=setTimeout(()=>node.className='',timeout); }
+function esc(value) { return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function api(path,options={}) { const response=await fetch(path,options); if(response.status===401){$('#login').classList.add('show');throw new Error('unauthorized');} if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.error||response.statusText);} return response.headers.get('content-type')?.startsWith('image/')?response.blob():response.json(); }
+async function doLogin() { const response=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('#username').value,password:$('#password').value})}); if(!response.ok){showStatus('failed','Login failed',0);return;} const data=await response.json(); if(data.role==='admin'){location.href='/admin';return;} $('#currentUser').textContent=data.user; $('#login').classList.remove('show'); $('#username').value='';$('#password').value=''; await loadTasks(); }
+async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
+async function loadTasks(){try{const data=await api('/api/tasks');tasks=data.tasks;renderTaskList();if(!currentTask&&tasks.length)await selectTask(tasks[0]);}catch(error){showStatus('failed',error.message,0);}}
+function renderTaskList(){const list=$('#taskList');list.innerHTML='';if(!tasks.length){list.innerHTML='<span class="muted">No assigned tasks</span>';return;}tasks.forEach(task=>{const button=document.createElement('button');button.className='task-card '+(currentTask?.task_id===task.task_id?'active ':'')+task.status;const frameText=task.frame_mode==='paired'?`T1 ${task.t1_frame_index} -> T2 ${task.t2_frame_index}`:`Frame ${task.frame_index}`;button.innerHTML=`<strong>${esc(task.metric_label)}</strong><small>${frameText}</small><small>${esc(task.status)}</small>`;button.onclick=()=>selectTask(task);list.appendChild(button);});}
+function taskQuery(task=currentTask){return `subject=${encodeURIComponent(task.subject)}&session_id=${encodeURIComponent(task.session_id)}&trial=${encodeURIComponent(task.trial)}&task_id=${encodeURIComponent(task.task_id)}`;}
+async function selectTask(task){await saveIfDirty();currentTask=task;activePose=task.frame_mode==='paired'?'t1':'frame';entry=null;taskPayload=null;predictedPoints={};comparison=null;selectedPoint=null;$('#taskTitle').textContent=task.metric_label;$('#taskStatus').textContent=`Task ${task.task_id}`;$('#taskInfo').textContent=task.frame_mode==='paired'?`${task.subject} / ${task.session_id} / ${task.trial} / T1 frame ${task.t1_frame_index} / T2 frame ${task.t2_frame_index}`:`${task.subject} / ${task.session_id} / ${task.trial} / frame ${task.frame_index}`;try{taskPayload=await api(`/api/task?${taskQuery(task)}`);entry=taskPayload.entry||{status:taskPayload.status,blind_points_2d:taskPayload.blind_points_2d||{},blind_points_2d_by_pose:taskPayload.blind_points_2d_by_pose||{},quality:{},quality_by_pose:{},notes:'',notes_by_pose:{}};setReviewState();await loadTaskFrame();if(submitted())await loadReview();render();}catch(error){showStatus('failed',error.message,0);}}
+function poseDefinition(){return currentTask?.poses?.[activePose]||null;}
+function poseFrame(){return poseDefinition()?.frame_index ?? currentTask?.frame_index;}
+function posePoints(create=true){if(!entry)return {};if(currentTask?.frame_mode==='paired'){entry.blind_points_2d_by_pose=entry.blind_points_2d_by_pose||{};if(create&&!entry.blind_points_2d_by_pose[activePose])entry.blind_points_2d_by_pose[activePose]={};return entry.blind_points_2d_by_pose[activePose]||{};}entry.blind_points_2d=entry.blind_points_2d||{};return entry.blind_points_2d;}
+function poseQuality(create=true){if(!entry)return {};if(currentTask?.frame_mode==='paired'){entry.quality_by_pose=entry.quality_by_pose||{};if(create&&!entry.quality_by_pose[activePose])entry.quality_by_pose[activePose]={};return entry.quality_by_pose[activePose]||{};}entry.quality=entry.quality||{};return entry.quality;}
+function poseNotes(){if(!entry)return '';if(currentTask?.frame_mode==='paired')return entry.notes_by_pose?.[activePose]||'';return entry.notes||'';}
+async function selectPose(pose){if(!currentTask?.poses?.[pose]||pose===activePose)return;await saveIfDirty();activePose=pose;predictedPoints={};comparison=null;await loadTaskFrame();if(submitted())await loadReview();render();}
+function releaseStageLayout(){[stage,qaStage].forEach(element=>{element.classList.remove('sized');element.style.width='';element.style.height='';});[manualPanel,qaPanel].forEach(panel=>{panel.style.width='';panel.style.flex='';});stageWrap.classList.remove('zoomed','vertical-overflow');}
+function measureStageBase(){if(stage.classList.contains('sized'))releaseStageLayout();const bounds=rgb.getBoundingClientRect();if(!bounds.width||!bounds.height)return;baseStageSize={width:bounds.width,height:bounds.height};applyZoom();}
+async function loadTaskFrame(){const n=++requestNumber;const poseParam=currentTask?.frame_mode==='paired'?`&pose=${encodeURIComponent(activePose)}`:'';const url=`/api/task-frame?${taskQuery()}${poseParam}&v=${n}`;rgb.src=url;qaRgb.src=url;rgb.onload=()=>{if(n===requestNumber){svg.setAttribute('viewBox',`0 0 ${rgb.naturalWidth} ${rgb.naturalHeight}`);measureStageBase();render();}};qaRgb.onload=()=>{if(n===requestNumber){qaSvg.setAttribute('viewBox',`0 0 ${qaRgb.naturalWidth} ${qaRgb.naturalHeight}`);applyZoom();}};}
+function points(){return posePoints(true);} function required(){if(currentTask?.frame_mode==='paired'){const d=poseDefinition();return d?.required_points||currentTask?.required_points||[];}return currentTask?.required_points||[];} function submitted(){return ['submitted','reviewed'].includes(entry?.status);}
+function setReviewState(){const locked=submitted();if(locked)zoom=1;$('#finishButton').disabled=locked||!currentTask;$('#draftButton').disabled=locked||!currentTask;$('#resetKeypointsButton').disabled=locked||!currentTask;$('#usable').disabled=locked;$('#notes').disabled=locked;$('#reviewSection').style.display=locked?'block':'none';$('#qaPanel').style.display=locked?'flex':'none';$('#poseControls').style.display=currentTask?.frame_mode==='paired'?'flex':'none';$('#taskPoseHint').textContent=currentTask?.frame_mode==='paired'?'Annotate the neutral pose (T1: shoulder + hip) and the peak pose (T2: moving limb). ROM = limb at T2 vs. the neutral reference at T1.':'';$('#taskStatus').textContent=locked?`${currentTask.task_id} / ${entry.status}`:`${currentTask.task_id} / blind draft`;updatePoseControls();updateReviewText();applyZoom();}
+function updatePoseControls(){const paired=currentTask?.frame_mode==='paired';$('#poseControls').style.display=paired?'flex':'none';if(!paired)return;$('#poseT1').classList.toggle('active',activePose==='t1');$('#poseT2').classList.toggle('active',activePose==='t2');const definition=poseDefinition();$('#poseInfo').textContent=definition?`frame ${definition.frame_index} / ${Number(definition.timestamp_sec).toFixed(3)} s`:'';}
+function render(){if(!currentTask||!entry)return;const needed=required();const current=points();const list=$('#pointList');list.innerHTML='';needed.forEach(name=>{const row=document.createElement('div');row.className='point-row '+(current[name]?'complete':'');row.innerHTML=`<span class="point-dot"></span><span>${esc(name)}</span><button ${submitted()?'disabled':''}>${current[name]?'Select':'Place'}</button>`;row.querySelector('button').onclick=()=>{selectedPoint=name;render();};if(selectedPoint===name)row.style.outline='1px solid var(--gold)';list.appendChild(row);});const definition=poseDefinition();$('#frameInfo').textContent=currentTask.frame_mode==='paired'?`${activePose.toUpperCase()} RGB frame ${definition.frame_index} / ${Number(definition.timestamp_sec).toFixed(3)} s`:`Fixed RGB frame ${currentTask.frame_index} / ${Number(currentTask.timestamp_sec).toFixed(3)} s`;const quality=poseQuality(false);$('#usable').checked=Boolean(quality.usable);$('#notes').value=poseNotes();updatePoseControls();renderQuality();renderManualSvg(needed,current);renderQaSvg(needed);updateReviewText();renderTaskList();}
+function renderManualSvg(needed,current){svg.innerHTML='';Object.entries(current).forEach(([name,point])=>{if(!needed.includes(name))return;const circle=document.createElementNS('http://www.w3.org/2000/svg','circle');circle.setAttribute('class','manual-point '+(name===selectedPoint?'active':''));circle.setAttribute('cx',point.x);circle.setAttribute('cy',point.y);circle.setAttribute('r',8);circle.dataset.name=name;if(!submitted())circle.addEventListener('pointerdown',startDrag);svg.appendChild(circle);const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('class','manual-label');label.setAttribute('x',point.x+11);label.setAttribute('y',point.y-9);label.textContent=name;svg.appendChild(label);});}
+function renderQaSvg(needed){qaSvg.innerHTML='';if(!submitted())return;Object.entries(predictedPoints).forEach(([name,point])=>{if(!needed.includes(name))return;const circle=document.createElementNS('http://www.w3.org/2000/svg','circle');circle.setAttribute('class','pred-point');circle.setAttribute('cx',point.x);circle.setAttribute('cy',point.y);circle.setAttribute('r',9);qaSvg.appendChild(circle);const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('class','pred-label');label.setAttribute('x',point.x+10);label.setAttribute('y',point.y+4);label.textContent=name;qaSvg.appendChild(label);});}
+function svgPoint(event){const rect=svg.getBoundingClientRect();const view=svg.viewBox.baseVal;return{x:(event.clientX-rect.left)*view.width/rect.width,y:(event.clientY-rect.top)*view.height/rect.height};}
+function pointFromClient(clientX,clientY){const rect=svg.getBoundingClientRect();const view=svg.viewBox.baseVal;if(!view.width||!view.height||clientX<rect.left||clientX>rect.right||clientY<rect.top||clientY>rect.bottom)return null;return{x:(clientX-rect.left)*view.width/rect.width,y:(clientY-rect.top)*view.height/rect.height};}
+function placePointAt(clientX,clientY){if(!currentTask||submitted())return;const point=pointFromClient(clientX,clientY);if(!point)return;const name=selectedPoint||required().find(pointName=>!points()[pointName]);if(!name)return;points()[name]=point;selectedPoint=required().find(pointName=>!points()[pointName])||name;markDirty();render();}
+function resetKeypoints(){if(!currentTask||submitted())return;if(!window.confirm('Reset all manually placed keypoints for this task?'))return;if(currentTask.frame_mode==='paired'){entry.blind_points_2d_by_pose={t1:{},t2:{}};}else{entry.blind_points_2d={};}selectedPoint=required()[0]||null;markDirty();render();showStatus('unsaved','All keypoint placements reset');}
+stageWrap.addEventListener('pointerdown',event=>{const target=event.target;if(!currentTask||!(target instanceof Element)||!target.closest('.stage'))return;const isMiddlePan=event.button===1;const isLeftPan=event.button===0&&!target.closest('.manual-point');if(!isMiddlePan&&!isLeftPan)return;pan={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,startScrollLeft:stageWrap.scrollLeft,startScrollTop:stageWrap.scrollTop,moved:false};stageWrap.setPointerCapture(event.pointerId);},true);
+stageWrap.addEventListener('pointermove',event=>{const target=event.target;if(target instanceof Element){const pointStage=target.closest('.stage');if(pointStage)lastPointer={clientX:event.clientX,clientY:event.clientY,stage:pointStage};}if(!pan||event.pointerId!==pan.pointerId)return;const deltaX=event.clientX-pan.startX;const deltaY=event.clientY-pan.startY;if(!pan.moved&&Math.hypot(deltaX,deltaY)<4)return;pan.moved=true;event.preventDefault();stageWrap.classList.add('panning');stageWrap.scrollLeft=pan.startScrollLeft-deltaX;stageWrap.scrollTop=pan.startScrollTop-deltaY;});
+function finishPan(event){if(!pan||event.pointerId!==pan.pointerId)return;event.preventDefault();if(stageWrap.hasPointerCapture(event.pointerId))stageWrap.releasePointerCapture(event.pointerId);const moved=pan.moved;pan=null;stageWrap.classList.remove('panning');if(moved){panJustEnded=true;setTimeout(()=>{panJustEnded=false;},0);}}
+stageWrap.addEventListener('pointerup',finishPan);stageWrap.addEventListener('pointercancel',finishPan);stageWrap.addEventListener('click',event=>{if(!panJustEnded)return;event.preventDefault();event.stopPropagation();panJustEnded=false;},true);stageWrap.addEventListener('pointerleave',()=>{if(!pan)lastPointer=null;});
+window.addEventListener('keydown',event=>{if(event.code!=='Space'||event.repeat||['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName))return;spacePressed=true;stageWrap.classList.add('pan-ready');event.preventDefault();if(lastPointer&&lastPointer.stage?.contains(document.elementFromPoint(lastPointer.clientX,lastPointer.clientY)))placePointAt(lastPointer.clientX,lastPointer.clientY);});
+window.addEventListener('keyup',event=>{if(event.code!=='Space')return;spacePressed=false;stageWrap.classList.remove('pan-ready');event.preventDefault();});window.addEventListener('blur',()=>{spacePressed=false;stageWrap.classList.remove('pan-ready');});
+function startDrag(event){event.preventDefault();drag={name:event.currentTarget.dataset.name};svg.setPointerCapture(event.pointerId);selectedPoint=drag.name;}
+svg.addEventListener('pointermove',event=>{if(!drag)return;const view=svg.viewBox.baseVal;const point=svgPoint(event);points()[drag.name]={x:Math.max(0,Math.min(view.width,point.x)),y:Math.max(0,Math.min(view.height,point.y))};markDirty();render();});svg.addEventListener('pointerup',()=>{drag=null;});svg.addEventListener('pointercancel',()=>{drag=null;});
+function renderQuality(result=null){const panel=$('#quality');const missing=required().filter(name=>!points()[name]);if(!currentTask){panel.className='quality';panel.innerHTML='<span class="muted">No task selected.</span>';return;}if(result?.error){panel.className='quality bad';panel.textContent=result.error;$('#manualAngle').textContent='-';return;}panel.className='quality '+(missing.length?'bad':'good');panel.innerHTML=`<span>${missing.length?'Complete the blind annotation':'All required points placed'}</span><span class="muted">Missing: ${esc(missing.join(', ')||'none')}</span>`;if(result?.manual_angle_deg!=null){$('#manualAngle').textContent=`${Number(result.manual_angle_deg).toFixed(1)} deg`;}else{$('#manualAngle').textContent='-';}}
+function schedulePreview(){clearTimeout(previewTimer);previewTimer=setTimeout(()=>previewManual().catch(error=>renderQuality({error:error.message})),150);}
+async function previewManual(){if(!currentTask||submitted())return null;const payload={...currentTask};if(currentTask.frame_mode==='paired'){payload.pose=activePose;payload.blind_points_2d_by_pose=entry.blind_points_2d_by_pose||{};}else{payload.blind_points_2d=points();}const result=await api('/api/task-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});renderQuality(result);return result;}
+function updateDraftMetadata(){if(!entry||submitted())return;const quality=poseQuality(true);quality.usable=$('#usable').checked;entry.notes_by_pose=entry.notes_by_pose||{};if(currentTask?.frame_mode==='paired')entry.notes_by_pose[activePose]=$('#notes').value;else entry.notes=$('#notes').value;markDirty();}
+function markDirty(){if(submitted())return;dirty=true;showStatus('unsaved','Unsaved draft');clearTimeout(saveTimer);saveTimer=setTimeout(saveDraft,900);}
+async function saveIfDirty(){if(dirty)await saveDraft();}
+async function saveDraft(){if(!currentTask||submitted())return;clearTimeout(saveTimer);try{const payload={...currentTask,action:'draft',quality:poseQuality(false),notes:poseNotes()};if(currentTask.frame_mode==='paired'){payload.pose=activePose;payload.blind_points_2d_by_pose=entry.blind_points_2d_by_pose||{};payload.quality_by_pose=entry.quality_by_pose||{};payload.notes_by_pose=entry.notes_by_pose||{};}else{payload.blind_points_2d=points();}const result=await api('/api/task-annotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});entry=result.entry;dirty=false;showStatus('',`Draft saved for ${currentTask.frame_mode==='paired'?activePose.toUpperCase():'frame'} ${poseFrame()}`,2200);render();}catch(error){showStatus('failed',`Draft save failed: ${error.message}`,0);}}
+async function finishAnnotation(){if(!currentTask||submitted())return;if(currentTask.frame_mode==='paired'){const missingByPose={};for(const pose of ['t1','t2']){const poseReq=currentTask?.poses?.[pose]?.required_points||currentTask?.required_points||[];const missing=poseReq.filter(name=>!entry.blind_points_2d_by_pose?.[pose]?.[name]);if(missing.length)missingByPose[pose]=missing;}if(Object.keys(missingByPose).length){showStatus('failed',Object.entries(missingByPose).map(([pose,missing])=>`${pose.toUpperCase()}: ${missing.join(', ')}`).join(' / '));return;}}else{const missing=required().filter(name=>!points()[name]);if(missing.length){showStatus('failed',`Place: ${missing.join(', ')}`);return;}}await saveIfDirty();try{const payload={...currentTask,action:'submit'};if(currentTask.frame_mode==='paired'){payload.blind_points_2d_by_pose=entry.blind_points_2d_by_pose||{};payload.quality_by_pose=entry.quality_by_pose||{};payload.notes_by_pose=entry.notes_by_pose||{};}else{payload.blind_points_2d=points();payload.quality=entry.quality||{};payload.notes=entry.notes||'';}const result=await api('/api/task-annotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});entry=result.entry;comparison=result.comparison;predictedPoints=currentTask.frame_mode==='paired'?(comparison?.mmpose_points_by_pose?.[activePose]||{}):(comparison?.mmpose_points||{});dirty=false;setReviewState();render();showStatus('',`Annotation finished. MMPose is now visible.`,5000);await loadReview();}catch(error){showStatus('failed',`Could not finish: ${error.message}`,0);}}
+async function loadReview(){if(!submitted())return;try{const pose=await api(`/api/task-mmpose-frame?${taskQuery()}${currentTask.frame_mode==='paired'?`&pose=${encodeURIComponent(activePose)}`:''}`);predictedPoints=pose.points||predictedPoints;comparison=await api(`/api/task-comparison?${taskQuery()}`);render();}catch(error){showStatus('failed',error.message,0);}}
+function updateReviewText(){const box=$('#reviewPanel');const message=$('#reviewedMessage');if(!submitted()){box.classList.remove('show');message.textContent='';$('#comparison').innerHTML='';return;}box.classList.add('show');if(comparison?.frame_mode==='paired'){const value=(key)=>comparison[key]==null?'-':`${Number(comparison[key]).toFixed(1)} deg`;$('#comparison').innerHTML=`<span class="big">Manual ROM: ${value('manual_rom_deg')}</span><span class="big">MMPose ROM: ${value('mmpose_rom_deg')}</span><span class="difference">MMPose - annotated: ${value('signed_error_deg')}</span><span class="muted">Reference: neutral (T1) pose / ${esc(comparison.comparison_mode||'unknown')}</span>`;}else if(comparison){const manual=comparison.manual_angle_deg==null?'-':`${Number(comparison.manual_angle_deg).toFixed(1)} deg`;const mmpose=comparison.mmpose_angle_deg==null?'-':`${Number(comparison.mmpose_angle_deg).toFixed(1)} deg`;const difference=comparison.signed_error_deg==null?'-':`${Number(comparison.signed_error_deg).toFixed(1)} deg`;$('#comparison').innerHTML=`<span class="big">Annotated RGBD: ${manual}</span><span class="big">MMPose RGBD: ${mmpose}</span><span class="difference">MMPose - annotated: ${difference}</span><span class="muted">Mode: ${esc(comparison.comparison_mode||'unknown')}</span>`;}else{$('#comparison').innerHTML='<span class="muted">Loading MMPose comparison...</span>';}if(entry.status==='reviewed'){message.textContent=entry.mmpose_agree?'Marked agree with MMPose.':'Marked disagree with MMPose.';box.classList.remove('show');}}
+function showDisagreement(){$('#disagreementBox').style.display='block';}
+async function submitReview(decision){if(!currentTask||!submitted())return;try{const result=await api('/api/task-annotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...currentTask,action:'review',review_decision:decision,disagreement_reason:$('#disagreementReason').value})});entry=result.entry;setReviewState();render();await loadTasks();showStatus('',decision==='agree'?'Agreement saved':'Disagreement saved',4000);}catch(error){showStatus('failed',error.message,0);}}
+function toggleDepth(){const visible=depth.style.display!=='block';if(!currentTask){return;}const poseParam=currentTask.frame_mode==='paired'?`&pose=${encodeURIComponent(activePose)}`:'';const url=`/api/task-depth-overlay?${taskQuery()}${poseParam}&v=${requestNumber}`;depth.src=url;qaDepth.src=url;depth.onload=()=>depth.style.display=visible?'block':'none';qaDepth.onload=()=>qaDepth.style.display=(visible&&submitted())?'block':'none';if(!visible){depth.style.display='none';qaDepth.style.display='none';}$('#depthButton').textContent=visible?'Hide depth':'Show depth';}
+function applyZoom(){$('#zoomValue').textContent=`${Math.round(zoom*100)}%`;if(!baseStageSize)return;const width=baseStageSize.width*zoom;const height=baseStageSize.height*zoom;[stage,qaStage].forEach(element=>{element.classList.add('sized');element.style.width=`${width}px`;element.style.height=`${height}px`;});[manualPanel,qaPanel].forEach(panel=>{panel.style.width=`${width}px`;panel.style.flex='0 0 auto';});stageWrap.classList.remove('zoomed','vertical-overflow');stageWrap.classList.toggle('zoomed',stageWrap.scrollWidth>stageWrap.clientWidth+1);stageWrap.classList.toggle('vertical-overflow',stageWrap.scrollHeight>stageWrap.clientHeight+1);}
+function zoomIn(){zoom=Math.min(MAX_ZOOM,zoom+ZOOM_STEP);applyZoom();}function zoomOut(){zoom=Math.max(MIN_ZOOM,zoom-ZOOM_STEP);applyZoom();}function resetZoom(){zoom=1;applyZoom();}
+stageWrap.addEventListener('wheel',event=>{const target=event.target;if(!currentTask||!(target instanceof Element))return;const zoomStage=target.closest('.stage');if(!zoomStage)return;event.preventDefault();const before=zoomStage.getBoundingClientRect();const relativeX=before.width?(event.clientX-before.left)/before.width:.5;const relativeY=before.height?(event.clientY-before.top)/before.height:.5;const nextZoom=Math.max(MIN_ZOOM,Math.min(MAX_ZOOM,zoom+(event.deltaY<0?ZOOM_STEP:-ZOOM_STEP)));if(nextZoom===zoom)return;zoom=nextZoom;applyZoom();const after=zoomStage.getBoundingClientRect();stageWrap.scrollLeft+=after.left+relativeX*after.width-event.clientX;stageWrap.scrollTop+=after.top+relativeY*after.height-event.clientY;},{passive:false});
+window.addEventListener('resize',()=>{zoom=1;baseStageSize=null;releaseStageLayout();if(rgb.complete&&rgb.naturalWidth)requestAnimationFrame(measureStageBase);applyZoom();});
+applyZoom();$('#login').classList.add('show');
 </script>
 </body>
 </html>
