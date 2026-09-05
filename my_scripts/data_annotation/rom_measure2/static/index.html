@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ROM Measure 2</title>
+  <style>
+    :root {
+      --bg: #0d1420;
+      --panel: #151f2e;
+      --panel-2: #1d2a3d;
+      --line: #314157;
+      --text: #e8eef7;
+      --muted: #91a0b5;
+      --accent: #67d5ff;
+      --accent-dark: #0b3445;
+      --good: #62dc9b;
+      --danger: #ff8d8d;
+      --gold: #f4c76b;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, textarea { font: inherit; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px 12px;
+      color: var(--text);
+      background: var(--panel-2);
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button:disabled { cursor: default; opacity: .55; }
+    button.primary { color: var(--accent-dark); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+    button.small { padding: 5px 8px; font-size: 12px; }
+    input, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 8px 9px; color: var(--text); background: #0d1725; }
+    textarea { min-height: 72px; resize: vertical; }
+    label { color: var(--muted); font-size: 12px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 16px; }
+    h3 { margin-bottom: 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .muted { color: var(--muted); }
+    .hidden { display: none !important; }
+    .login-layer { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgba(6, 10, 16, .94); }
+    .login-card { width: min(390px, 100%); padding: 26px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 20px 60px #0007; }
+    .login-card h1 { margin-bottom: 5px; }
+    .login-card p { margin-bottom: 18px; color: var(--muted); }
+    .field { display: grid; gap: 5px; margin: 12px 0; }
+    .login-card button { width: 100%; margin-top: 6px; }
+    .error { min-height: 20px; margin-top: 10px; color: var(--danger); font-size: 13px; }
+    .app { height: 100%; display: grid; grid-template-rows: auto 1fr; }
+    .topbar { display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: #111b2a; }
+    .topbar .user { margin-left: auto; color: var(--muted); }
+    .shell { min-height: 0; display: grid; grid-template-columns: 290px minmax(0, 1fr); }
+    aside { min-width: 0; overflow: auto; padding: 16px; border-right: 1px solid var(--line); background: var(--panel); }
+    main { min-width: 0; overflow: auto; padding: 18px; }
+    .section { margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+    .section > h2 { margin-bottom: 7px; }
+    .task-list { display: grid; gap: 8px; margin-top: 12px; }
+    .task-button { width: 100%; text-align: left; }
+    .task-button.active { border-color: var(--accent); background: #123a4b; }
+    .task-button strong, .task-button small { display: block; }
+    .task-button small { margin-top: 3px; color: var(--muted); }
+    .task-button .submitted { color: var(--good); }
+    .empty { display: grid; place-items: center; min-height: 300px; padding: 30px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); text-align: center; }
+    .workspace-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
+    .workspace-head .meta { margin-left: auto; color: var(--muted); font-size: 12px; text-align: right; }
+    .instructions { margin-bottom: 14px; padding: 10px 12px; border-left: 3px solid var(--accent); border-radius: 5px; color: #c7d7e9; background: #111f30; }
+    .video-grid { display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap: 14px; }
+    .video-card, .annotation-panel { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+    .video-card-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    .video-card-head strong { color: var(--accent); }
+    .video-card-head span { margin-left: auto; max-width: 62%; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+    .annotation-banner { display: flex; align-items: center; justify-content: center; min-height: 68px; margin: 10px 12px 0; padding: 10px 14px; border: 4px solid #ff4d5d; border-radius: 8px; color: #fff; background: #5a141e; box-shadow: 0 0 0 2px #ff4d5d33, 0 5px 18px #0005; font-size: clamp(24px, 3.5vw, 42px); font-weight: 900; line-height: 1.1; text-align: center; }
+    .view-warning { display: flex; align-items: center; justify-content: center; min-height: 58px; margin: 10px 12px 0; padding: 10px 14px; border: 4px solid #ff4d5d; border-radius: 8px; color: #fff; background: #5a141e; box-shadow: 0 0 0 2px #ff4d5d33, 0 5px 18px #0005; font-size: clamp(20px, 2.8vw, 34px); font-weight: 900; line-height: 1.1; text-align: center; text-transform: uppercase; }
+    .stage { position: relative; width: 100%; background: #05080c; line-height: 0; }
+    .stage img { display: block; width: 100%; height: auto; object-fit: contain; }
+    .stage .depth-overlay { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; opacity: .48; }
+    .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+    .stage svg.inactive { pointer-events: none; }
+    .fixed-frame { padding: 9px 12px 11px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .depth-info { padding: 0 12px 10px; color: #c7d7e9; font-size: 12px; }
+    .annotation-panel { display: grid; gap: 14px; margin-top: 16px; padding: 14px; }
+    .annotation-head { display: flex; align-items: baseline; gap: 12px; }
+    .annotation-head .muted { margin-left: auto; font-size: 12px; }
+    .point-list { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 8px; }
+    .point-button { display: flex; align-items: center; gap: 8px; text-align: left; }
+    .point-button.selected { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+    .point-button.done { color: var(--good); }
+    .dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--line); }
+    .point-button.done .dot { background: var(--good); }
+    .status-row { min-height: 22px; color: var(--muted); }
+    .status-row.bad { color: var(--danger); }
+    .status-row.good { color: var(--good); }
+    .depth-readout { color: var(--muted); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+    .actions { display: flex; align-items: center; gap: 9px; }
+    .actions .muted { margin-left: auto; font-size: 12px; }
+    .manual-point { fill: #f8d66d; stroke: #111827; stroke-width: 3; cursor: grab; }
+    .manual-point.active { fill: #fff; stroke: var(--gold); }
+    .angle-line { fill: none; stroke: #f8d66d; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+    .point-label { fill: #fff6cf; font: 700 18px system-ui, sans-serif; paint-order: stroke; stroke: #111827; stroke-width: 4px; }
+    .angle-label { fill: #67d5ff; font: 700 34px system-ui, sans-serif; paint-order: stroke; stroke: #111827; stroke-width: 7px; }
+    .model-point { fill: #69e6c1; stroke: #06241f; stroke-width: 3; opacity: .95; }
+    .model-point-label { fill: #b8ffe6; font: 700 17px system-ui, sans-serif; paint-order: stroke; stroke: #111827; stroke-width: 4px; }
+    .model-line { fill: none; stroke: #69e6c1; stroke-width: 3; stroke-dasharray: 9 6; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+    .model-angle-label { fill: #69e6c1; font: 700 29px system-ui, sans-serif; paint-order: stroke; stroke: #111827; stroke-width: 7px; }
+    .torso-plane { fill: #f4c76b; fill-opacity: .22; stroke: #f4c76b; stroke-width: 5; stroke-linejoin: round; opacity: .9; }
+    .comparison-box { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #101a28; }
+    .comparison-box h3 { margin: 0; }
+    .comparison-heading { margin-top: 2px !important; }
+    .comparison-values { display: grid; gap: 8px; }
+    .angle-values { grid-template-columns: repeat(3, minmax(110px, 1fr)); }
+    .difference-values { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+    .comparison-value { padding: 8px; border-radius: 6px; background: #172437; }
+    .comparison-value.invalid { border: 2px solid #ff4d5d; background: #3b1820; }
+    .comparison-value strong, .comparison-value span { display: block; }
+    .comparison-value strong { color: var(--accent); font-size: 18px; font-variant-numeric: tabular-nums; }
+    .comparison-value.invalid strong { color: #ff8d8d; }
+    .difference-values .comparison-value strong { color: var(--gold); }
+    .comparison-value span { color: var(--muted); font-size: 11px; }
+    .comparison-status { min-height: 18px; color: var(--muted); font-size: 12px; }
+    #toast { position: fixed; right: 18px; bottom: 18px; z-index: 30; max-width: min(440px, calc(100vw - 36px)); padding: 11px 14px; border: 1px solid var(--line); border-radius: 8px; background: #172437; box-shadow: 0 8px 30px #0008; }
+    #toast.good { border-color: var(--good); }
+    #toast.bad { border-color: var(--danger); color: #ffd1d1; }
+    @media (max-width: 1100px) {
+      .angle-values { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+    }
+    @media (max-width: 820px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { max-height: none; border-right: 0; border-bottom: 1px solid var(--line); }
+      .video-grid { grid-template-columns: 1fr; }
+      .point-list { grid-template-columns: 1fr; }
+      .angle-values, .difference-values { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="loginLayer" class="login-layer">
+    <form id="loginForm" class="login-card">
+      <h1>ROM Measure 2</h1>
+      <p>Annotator view</p>
+      <div class="field"><label for="loginUser">Username</label><input id="loginUser" autocomplete="username" required></div>
+      <div class="field"><label for="loginPassword">Password</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
+      <button class="primary" type="submit">Sign in</button>
+      <div id="loginError" class="error"></div>
+    </form>
+  </div>
+
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <h1>ROM Measure 2 <span class="muted">· annotator</span></h1>
+      <span id="userLabel" class="user"></span>
+      <button id="logoutButton" class="small">Log out</button>
+    </header>
+    <div class="shell">
+      <aside>
+        <section class="section">
+          <h2>Your tasks</h2>
+          <p class="muted">Select a task prepared by the admin.</p>
+          <div id="taskList" class="task-list"><span class="muted">Loading…</span></div>
+        </section>
+      </aside>
+      <main>
+        <div id="emptyState" class="empty"><div><h2>No task selected</h2><p style="margin-top:6px">Choose a task from the list.</p></div></div>
+        <div id="workspace" class="hidden">
+          <div class="workspace-head">
+            <div><h2 id="taskTitle"></h2><p id="taskId" class="muted"></p></div>
+            <div id="taskMeta" class="meta"></div>
+          </div>
+            <div id="instructions" class="instructions"></div>
+          <div class="video-grid">
+            <article class="video-card">
+              <div id="leftAnnotationBanner" class="annotation-banner hidden">Annotate only this frame</div>
+              <div class="video-card-head"><strong>LEFT · SIDE VIEW</strong><span id="leftName"></span></div>
+              <div id="leftStage" class="stage"><img id="leftFrame" alt="Fixed side-view frame"><img id="leftDepthOverlay" class="depth-overlay hidden" alt="Depth color overlay"><svg id="leftOverlay" aria-label="Left frame annotation overlay"></svg></div>
+              <div id="leftFrameInfo" class="fixed-frame"></div>
+              <div id="leftDepthInfo" class="depth-info"></div>
+            </article>
+            <article class="video-card">
+              <div id="rightAnnotationBanner" class="annotation-banner hidden">Annotate only this frame</div>
+              <div class="video-card-head"><strong>RIGHT · FRONT VIEW</strong><span id="rightName"></span></div>
+              <div id="rightViewWarning" class="view-warning hidden" role="alert"></div>
+              <div class="stage right-stage"><img id="rightFrame" alt="Fixed front-view frame"><img id="rightDepthOverlay" class="depth-overlay hidden" alt="Depth color overlay"><svg id="rightOverlay" aria-label="Right frame annotation overlay"></svg></div>
+              <div id="rightFrameInfo" class="fixed-frame"></div>
+              <div id="rightDepthInfo" class="depth-info"></div>
+            </article>
+          </div>
+
+          <section class="annotation-panel">
+            <div class="annotation-head"><h2 id="annotationTitle">Annotate the target frame</h2><span id="annotationState" class="muted"></span></div>
+            <p id="annotationInstructions" class="muted">Select a point, then click its location on the target image. You can drag a placed point to adjust it.</p>
+            <div id="pointList" class="point-list"></div>
+            <div id="placementStatus" class="status-row"></div>
+            <div id="comparisonBox" class="comparison-box">
+              <h3 class="comparison-heading">Angles</h3>
+              <div class="comparison-values angle-values">
+                <div class="comparison-value"><strong id="brettComparisonValue">—</strong><span id="brettComparisonLabel">Annotated 3D angle</span></div>
+                <div class="comparison-value"><strong id="mmposeComparisonValue">—</strong><span>MMPose 3D angle · side view</span></div>
+                <div class="comparison-value"><strong id="frontMmposeComparisonValue">—</strong><span id="frontMmposeComparisonLabel">MMPose 3D angle · front view</span></div>
+              </div>
+              <h3 class="comparison-heading">Absolute differences from annotated angle</h3>
+              <div class="comparison-values difference-values">
+                <div class="comparison-value"><strong id="sideMmposeErrorValue">—</strong><span>annotated vs side-view MMPose</span></div>
+                <div class="comparison-value"><strong id="frontMmposeErrorValue">—</strong><span id="frontMmposeErrorLabel">annotated vs front-view MMPose</span></div>
+              </div>
+              <div id="comparisonStatus" class="comparison-status"></div>
+            </div>
+            <div id="depthReadout" class="depth-readout"></div>
+            <div class="field"><label for="annotationNotes">Notes (optional)</label><textarea id="annotationNotes" maxlength="2000" placeholder="Add a note about this annotation"></textarea></div>
+            <div class="actions"><button id="resetButton" class="small" type="button">Reset points</button><button id="draftButton" type="button">Save draft</button><button id="submitButton" class="primary" type="button">Submit annotation</button><span id="saveStatus" class="muted"></span></div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+  <div id="toast" class="hidden"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const overlays = { left: $('leftOverlay'), right: $('rightOverlay') };
+    const depthOverlays = { left: $('leftDepthOverlay'), right: $('rightDepthOverlay') };
+    const depthInfoFor = (side) => $(side + 'DepthInfo');
+    const state = { user: null, tasks: [], task: null, annotation: null, referenceMmpose: null, points: {}, selected: null, preview: null, drag: null, previewRequest: 0, depthRequest: { left: 0, right: 0 } };
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, options);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      return data;
+    }
+    function showToast(message, kind = 'good') { const toast = $('toast'); toast.textContent = message; toast.className = kind; clearTimeout(state.toastTimer); state.toastTimer = setTimeout(() => toast.className = 'hidden', 3500); }
+    function setLoginError(message) { $('loginError').textContent = message || ''; }
+    function submitted() { return state.annotation?.status === 'submitted'; }
+    function required() { return state.task?.required_points || []; }
+    function missingPoints() { return required().filter(name => !state.points[name]); }
+    function taskView() { return state.task?.view === 'front' ? 'front' : 'side'; }
+    function frontReferenceInvalidMessage() {
+      if (taskView() !== 'side') return '';
+      if (state.task?.template === 'hip_flexion') return 'Shoulder occluded by thigh — INVALID';
+      if (state.task?.template === 'knee_flexion') return 'Knee occluded by thigh — INVALID';
+      return '';
+    }
+    function frontReferenceIsInvalid() { return Boolean(frontReferenceInvalidMessage()); }
+    function targetSide() { return taskView() === 'front' ? 'right' : 'left'; }
+    function targetOverlay() { return overlays[targetSide()]; }
+    function viewLabel() { return taskView() === 'front' ? 'front view (right video)' : 'side view (left video)'; }
+    function userLabel() { const user = String(state.user || 'User'); return user.charAt(0).toUpperCase() + user.slice(1); }
+    function displayPoint(name) { return String(name).replaceAll('_', ' '); }
+    function absoluteDifference(first, second) {
+      const left = Number(first), right = Number(second);
+      return Number.isFinite(left) && Number.isFinite(right) ? Math.abs(left - right) : null;
+    }
+    function pointLabel(name) {
+      const index = required().indexOf(name);
+      const labels = state.task?.annotation_labels || [];
+      return labels[index] || displayPoint(name);
+    }
+    function pointOrderLabel() { return required().map(pointLabel).join(' → '); }
+    function referenceInstruction() { return taskView() === 'side' ? 'The other image shows the front view for reference only.' : 'The other image shows the side view for reference only.'; }
+    function taskInstruction() {
+      const custom = state.task?.annotation_instruction;
+      return custom ? `${custom} ${referenceInstruction()}` : `Place ${pointOrderLabel()} on the ${viewLabel()} image in order. The 3D angle is measured at ${pointLabel(state.task?.angle_vertex)}. ${referenceInstruction()}`;
+    }
+    function placementInstruction() {
+      const selection = `Select ${pointLabel(state.selected || missingPoints()[0] || required()[0] || '')}, then click its location on the ${targetSide()} image. You can drag a placed point to adjust it.`;
+      return state.task?.annotation_instruction ? `${state.task.annotation_instruction} ${selection} ${referenceInstruction()}` : `${selection} ${referenceInstruction()}`;
+    }
+    function savedPoints(annotation) {
+      return annotation?.points || annotation?.points_2d || annotation?.left_points || {};
+    }
+
+    async function signIn(event) {
+      event.preventDefault(); setLoginError('');
+      try {
+        const result = await api('/api/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ username: $('loginUser').value, password: $('loginPassword').value }) });
+        if (result.role === 'admin') { window.location.href = '/admin'; return; }
+        await start(result.user);
+      } catch (error) { setLoginError(error.message); }
+    }
+    async function start(user) { state.user = user; $('userLabel').textContent = user; $('loginLayer').classList.add('hidden'); $('app').classList.remove('hidden'); try { await loadTasks(); } catch (error) { showToast(error.message, 'bad'); } }
+    async function checkSession() {
+      try { const result = await api('/api/me'); if (result.authenticated && result.role === 'admin') { window.location.href = '/admin'; return; } if (result.authenticated && result.role === 'annotator') await start(result.user); } catch (error) { setLoginError(error.message); }
+    }
+    async function logout() { await api('/api/logout', { method: 'POST' }); window.location.href = '/'; }
+
+    async function loadTasks(preferredId = null) {
+      const result = await api('/api/tasks'); state.tasks = result.tasks || []; renderTaskList();
+      const next = preferredId || state.task?.task_id || state.tasks[0]?.task_id;
+      if (next) await selectTask(next); else { $('emptyState').classList.remove('hidden'); $('workspace').classList.add('hidden'); }
+    }
+    function renderTaskList() {
+      const list = $('taskList'); list.innerHTML = '';
+      if (!state.tasks.length) { list.innerHTML = '<span class="muted">No tasks have been assigned yet.</span>'; return; }
+      state.tasks.forEach(task => {
+        const button = document.createElement('button'); button.className = 'task-button' + (state.task?.task_id === task.task_id ? ' active' : '');
+        const title = document.createElement('strong'); title.textContent = task.name; button.appendChild(title);
+        const comparison = task.status === 'submitted' && task.mmpose_error_deg != null ? ` · Δ ${Number(task.mmpose_error_deg).toFixed(1)}°` : '';
+        const status = document.createElement('small'); status.textContent = task.status === 'submitted' ? `Submitted · ${Number(task.angle_deg).toFixed(1)}°${comparison}` : task.status === 'draft' ? 'Draft saved' : 'Not started'; status.className = task.status === 'submitted' ? 'submitted' : ''; button.appendChild(status);
+        button.addEventListener('click', () => selectTask(task.task_id)); list.appendChild(button);
+      });
+    }
+    async function selectTask(taskId) {
+      try {
+        state.previewRequest += 1; state.drag = null;
+        const result = await api('/api/tasks/' + encodeURIComponent(taskId));
+        state.task = result.task;
+        state.annotation = result.annotation;
+        state.referenceMmpose = result.reference_mmpose || null;
+        state.points = {...savedPoints(result.annotation)};
+        state.preview = result.annotation?.angle_deg != null ? {
+          angle_deg: result.annotation.angle_deg,
+          signed_angle_deg: result.annotation.signed_angle_deg,
+          angle_dimension: result.annotation.angle_dimension || result.task.angle_dimension || '2d',
+          angle_method: result.annotation.angle_method || result.task.angle_method,
+          calculation_note: result.annotation.calculation_note || result.task.calculation_note,
+          points_3d: result.annotation.points_3d || {},
+          mmpose: result.annotation.mmpose || {available: false, points: {}, missing_points: []},
+          valid: true, missing_points: [], missing_depth_points: [],
+        } : null;
+        state.selected = missingPoints()[0] || required()[0] || null;
+        $('emptyState').classList.add('hidden'); $('workspace').classList.remove('hidden');
+        renderTask(); loadTaskFrames(); renderTaskList(); requestPreview(true);
+      } catch (error) { showToast(error.message, 'bad'); }
+    }
+    function renderTask() {
+      const task = state.task; const pair = task.pair; const side = targetSide();
+      $('taskTitle').textContent = task.name; $('taskId').textContent = task.task_id;
+      $('leftName').textContent = pair.left.original_name; $('rightName').textContent = pair.right.original_name;
+      $('leftAnnotationBanner').classList.toggle('hidden', targetSide() !== 'left');
+      $('rightAnnotationBanner').classList.toggle('hidden', targetSide() !== 'right');
+      const frontWarning = frontReferenceInvalidMessage();
+      $('rightViewWarning').textContent = frontWarning;
+      $('rightViewWarning').classList.toggle('hidden', !frontWarning);
+      const referenceLabel = task.template === 'hip_abduction' ? 'side MMPose trunk reference; front MMPose pelvic reference' : 'neutral = 0°';
+      $('taskMeta').textContent = `${viewLabel()} · points ${pointOrderLabel()} · left frame ${task.left_frame_index} · right frame ${task.right_frame_index} · ${referenceLabel}`;
+      const defaultInstructions = taskInstruction();
+      $('instructions').textContent = task.notes ? `${task.notes} ${defaultInstructions}` : defaultInstructions;
+      $('annotationTitle').textContent = `Annotate the ${taskView()} frame`;
+      $('annotationInstructions').textContent = placementInstruction();
+      $('brettComparisonLabel').textContent = `${userLabel()} annotated 3D angle`;
+      $('annotationNotes').value = state.annotation?.notes || ''; $('annotationState').textContent = submitted() ? 'Submitted · editable' : state.annotation?.status === 'draft' ? 'Draft' : 'Not started';
+      $('draftButton').disabled = false; $('submitButton').disabled = false; $('resetButton').disabled = false; renderPointList(); renderOverlay(); renderAngle();
+    }
+    function frameUrl(task, side, frameIndex) {
+      return `/frame/${encodeURIComponent(task.pair_id)}/${side}/${encodeURIComponent(frameIndex)}.jpg?v=${encodeURIComponent(task.pair.created_at || '1')}`;
+    }
+    function depthUrl(task, side, frameIndex) {
+      return `/depth/${encodeURIComponent(task.pair_id)}/${side}/${encodeURIComponent(frameIndex)}.png?v=${encodeURIComponent('cw90-v3-black-invalid-' + (task.pair.created_at || '1'))}`;
+    }
+    function loadDepthFrame(task, side, frameIndex) {
+      const overlay = depthOverlays[side]; const requestId = ++state.depthRequest[side]; const pairId = task.pair_id;
+      overlay.classList.add('hidden'); depthInfoFor(side).textContent = 'Depth overlay: loading…';
+      overlay.onload = () => {
+        if (state.task?.task_id !== task.task_id || requestId !== state.depthRequest[side]) return;
+        overlay.classList.remove('hidden'); depthInfoFor(side).textContent = 'Depth overlay shown · blue near → red far · black = no depth';
+      };
+      overlay.onerror = () => {
+        if (state.task?.task_id !== task.task_id || requestId !== state.depthRequest[side]) return;
+        overlay.classList.add('hidden'); depthInfoFor(side).textContent = `Depth overlay unavailable for RGB frame ${frameIndex}`;
+      };
+      overlay.src = depthUrl(task, side, frameIndex);
+    }
+    function loadTaskFrames() {
+      const task = state.task; const pair = task.pair;
+      const taskId = task.task_id;
+      const loadFrame = (side, frameIndex) => {
+        const image = $(side + 'Frame'); const video = pair[side];
+        overlays[side].setAttribute('viewBox', `0 0 ${video.width} ${video.height}`);
+        image.onload = () => {
+          if (state.task?.task_id !== taskId) return;
+          overlays[side].setAttribute('viewBox', `0 0 ${image.naturalWidth || video.width} ${image.naturalHeight || video.height}`);
+          window.requestAnimationFrame(renderOverlay);
+        };
+        image.onerror = () => {
+          if (state.task?.task_id === taskId) showToast(`Could not load the fixed ${side} frame.`, 'bad');
+        };
+        image.src = frameUrl(task, side, frameIndex);
+      };
+      loadFrame('left', task.left_frame_index); loadFrame('right', task.right_frame_index);
+      loadDepthFrame(task, 'left', task.left_frame_index); loadDepthFrame(task, 'right', task.right_frame_index);
+      $('leftFrameInfo').textContent = `Exact source frame ${task.left_frame_index} · ${Number(task.left_timestamp_sec).toFixed(3)} s · ${pair.left.width}×${pair.left.height}${pair.left.depth ? ` · ${pair.left.depth.format}` : ''}`;
+      $('rightFrameInfo').textContent = `Exact source frame ${task.right_frame_index} · ${Number(task.right_timestamp_sec).toFixed(3)} s · ${pair.right.width}×${pair.right.height}${pair.right.depth ? ` · ${pair.right.depth.format}` : ''}`;
+    }
+    function renderPointList() {
+      const list = $('pointList'); list.innerHTML = '';
+      required().forEach(name => {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'point-button' + (state.points[name] ? ' done' : '') + (state.selected === name ? ' selected' : ''); button.disabled = false;
+        const dot = document.createElement('span'); dot.className = 'dot'; button.appendChild(dot);
+        const label = document.createElement('span'); label.textContent = state.points[name] ? `${pointLabel(name)} ✓` : pointLabel(name); button.appendChild(label);
+        button.addEventListener('click', () => { state.selected = name; renderPointList(); renderOverlay(); }); list.appendChild(button);
+      });
+      const missing = missingPoints();
+      if (state.task) $('annotationInstructions').textContent = placementInstruction();
+      $('placementStatus').textContent = submitted() ? missing.length ? `Previously submitted; place the remaining point${missing.length === 1 ? '' : 's'} and resubmit.` : 'Previously submitted; you can adjust the points and resubmit.' : missing.length ? `Select “${pointLabel(state.selected || missing[0])}”, then click that point on the ${targetSide()} image. ${required().length - missing.length}/${required().length} placed.` : 'All required points are placed. Adjust any point if needed, then submit.';
+      $('placementStatus').className = 'status-row ' + (missing.length ? '' : 'good');
+    }
+    function pointFromEvent(overlay, event) {
+      const rect = overlay.getBoundingClientRect(); const view = overlay.viewBox.baseVal;
+      if (!rect.width || !rect.height || !view.width || !view.height) return null;
+      return { x: Math.max(0, Math.min(view.width, (event.clientX - rect.left) * view.width / rect.width)), y: Math.max(0, Math.min(view.height, (event.clientY - rect.top) * view.height / rect.height)) };
+    }
+    function invalidDepthAt(side, point) {
+      const depthOverlay = depthOverlays[side]; const annotationOverlay = overlays[side];
+      const view = annotationOverlay?.viewBox?.baseVal;
+      if (!depthOverlay || depthOverlay.classList.contains('hidden') || !depthOverlay.complete || !depthOverlay.naturalWidth || !depthOverlay.naturalHeight || !view?.width || !view?.height) return null;
+      try {
+        const canvas = document.createElement('canvas'); canvas.width = depthOverlay.naturalWidth; canvas.height = depthOverlay.naturalHeight;
+        const context = canvas.getContext('2d', { willReadFrequently: true }); if (!context) return null;
+        context.drawImage(depthOverlay, 0, 0);
+        const x = Math.max(0, Math.min(canvas.width - 1, Math.floor(point.x * canvas.width / view.width)));
+        const y = Math.max(0, Math.min(canvas.height - 1, Math.floor(point.y * canvas.height / view.height)));
+        const pixel = context.getImageData(x, y, 1, 1).data;
+        // The server marks invalid depth with zero RGB (black).
+        return pixel[3] >= 160 && pixel[0] <= 8 && pixel[1] <= 8 && pixel[2] <= 8;
+      } catch (error) {
+        // If the browser cannot sample the overlay, keep the server-side
+        // point-cloud validation as the fallback.
+        return null;
+      }
+    }
+    function rejectInvalidDepth(side) {
+      const message = `Invalid depth at that location on the ${side === 'left' ? 'side' : 'front'} view. Choose another point outside the black/no-depth region.`;
+      $('placementStatus').textContent = message; $('placementStatus').className = 'status-row bad'; showToast(message, 'bad');
+    }
+    function drawTorsoPlane(overlay, modelPoints) {
+      const corners = [
+        modelPoints.left_shoulder,
+        modelPoints.right_shoulder,
+        modelPoints.right_hip,
+        modelPoints.left_hip,
+      ];
+      if (corners.some(point => !point)) return;
+      addSvg(overlay, 'polygon', {
+        points: corners.map(point => `${point.x},${point.y}`).join(' '),
+        class: 'torso-plane',
+      });
+    }
+    function renderModelPose(overlay, pose, order, labelPoints = false, showAngle = false, anglePrefix = 'M', showTorsoPlane = false) {
+      const modelPoints = pose?.points || {};
+      const modelOrder = pose?.angle_points?.length ? pose.angle_points : order;
+      const angleVertexName = pose?.angle_vertex || modelOrder[1] || order[1];
+      const modelFirst = modelPoints[modelOrder[0]], modelVertex = modelPoints[angleVertexName] || modelPoints[modelOrder[1]] || modelPoints[order[1]], modelSecond = modelPoints[modelOrder[2]];
+      const displayedPoints = new Set(pose?.relevant_points || required());
+      const frontPlaneMethod = pose?.angle_method === 'front_sagittal_shoulder' || pose?.angle_method === 'front_trunk' || pose?.angle_method === 'front_hip_abduction';
+      if (showTorsoPlane) drawTorsoPlane(overlay, modelPoints);
+      if (frontPlaneMethod) {
+        const leftShoulder = modelPoints.left_shoulder, rightShoulder = modelPoints.right_shoulder;
+        const leftHip = modelPoints.left_hip, rightHip = modelPoints.right_hip;
+        const shoulderMidpoint = leftShoulder && rightShoulder ? { x:(leftShoulder.x + rightShoulder.x) / 2, y:(leftShoulder.y + rightShoulder.y) / 2 } : null;
+        const hipMidpoint = leftHip && rightHip ? { x:(leftHip.x + rightHip.x) / 2, y:(leftHip.y + rightHip.y) / 2 } : null;
+        if (shoulderMidpoint && hipMidpoint) {
+          addSvg(overlay, 'line', { x1:shoulderMidpoint.x, y1:shoulderMidpoint.y, x2:hipMidpoint.x, y2:hipMidpoint.y, class:'model-line' });
+          addSvg(overlay, 'circle', { cx:shoulderMidpoint.x, cy:shoulderMidpoint.y, r:5, class:'model-point' });
+          addSvg(overlay, 'circle', { cx:hipMidpoint.x, cy:hipMidpoint.y, r:5, class:'model-point' });
+        }
+        const segmentSide = String(angleVertexName || '').split('_')[0];
+        const segmentEnd = pose?.angle_method === 'front_hip_abduction' ? 'knee' : 'elbow';
+        const segmentVertex = modelPoints[angleVertexName] || modelPoints[`${segmentSide}_shoulder`], segmentPoint = modelPoints[`${segmentSide}_${segmentEnd}`];
+        if (segmentVertex && segmentPoint) addSvg(overlay, 'line', { x1:segmentVertex.x, y1:segmentVertex.y, x2:segmentPoint.x, y2:segmentPoint.y, class:'model-line' });
+      } else {
+        if (modelOrder.length === 2) {
+          const modelEnd = modelPoints[modelOrder[1]];
+          if (modelFirst && modelEnd) addSvg(overlay, 'line', { x1:modelFirst.x, y1:modelFirst.y, x2:modelEnd.x, y2:modelEnd.y, class:'model-line' });
+        } else {
+          if (modelFirst && modelVertex) addSvg(overlay, 'line', { x1:modelFirst.x, y1:modelFirst.y, x2:modelVertex.x, y2:modelVertex.y, class:'model-line' });
+          if (modelVertex && modelSecond) addSvg(overlay, 'line', { x1:modelVertex.x, y1:modelVertex.y, x2:modelSecond.x, y2:modelSecond.y, class:'model-line' });
+        }
+        if (pose?.angle_method === 'ankle_sagittal') {
+          const heel = modelPoints.right_heel, bigToe = modelPoints.right_big_toe, smallToe = modelPoints.right_small_toe;
+          const toeMidpoint = bigToe && smallToe ? { x:(bigToe.x + smallToe.x) / 2, y:(bigToe.y + smallToe.y) / 2 } : null;
+          if (heel && toeMidpoint) addSvg(overlay, 'line', { x1:heel.x, y1:heel.y, x2:toeMidpoint.x, y2:toeMidpoint.y, class:'model-line' });
+        }
+      }
+      Object.entries(modelPoints).forEach(([name, point]) => {
+        if (!displayedPoints.has(name)) return;
+        addSvg(overlay, 'circle', { cx:point.x, cy:point.y, r:7, class:'model-point' });
+        if (labelPoints) { const label = addSvg(overlay, 'text', { x:point.x + 12, y:point.y - 10, class:'model-point-label' }); label.textContent = displayPoint(name); }
+      });
+      if (showAngle && pose?.angle_deg != null && modelVertex) { const label = addSvg(overlay, 'text', { x:modelVertex.x + 14, y:modelVertex.y - 18, class:'model-angle-label' }); label.textContent = `${anglePrefix} ${Number(pose.angle_deg).toFixed(1)}°`; }
+    }
+    function renderOverlay() {
+      Object.values(overlays).forEach(overlay => { overlay.innerHTML = ''; overlay.classList.add('inactive'); });
+      if (!state.task) return;
+      const overlay = targetOverlay(); overlay.classList.remove('inactive');
+      const referenceSide = overlay === overlays.left ? 'right' : 'left';
+      const order = state.task.angle_points || [];
+      const labelTargetModel = state.task.angle_method === 'front_abduction_manual' || state.task.angle_method === 'front_hip_abduction_manual' || state.task.angle_method === 'shoulder_axial_manual' || state.task.angle_method === 'hip_axial_manual';
+      renderModelPose(overlay, state.preview?.mmpose, order, labelTargetModel, true, 'M', overlay === overlays.right);
+      if (state.task.angle_method !== 'front_abduction_manual' && state.task.angle_method !== 'shoulder_axial_manual') {
+        renderModelPose(
+          overlays[referenceSide],
+          state.referenceMmpose,
+          order,
+          true,
+          state.referenceMmpose?.angle_deg != null && !frontReferenceIsInvalid(),
+          'M front',
+          overlays[referenceSide] === overlays.right,
+        );
+      }
+      const first = state.points[order[0]], vertex = state.points[order[1]], second = state.points[order[2]];
+      if (first && vertex) addSvg(overlay, 'line', { x1:first.x, y1:first.y, x2:vertex.x, y2:vertex.y, class:'angle-line' });
+      if (vertex && second) addSvg(overlay, 'line', { x1:vertex.x, y1:vertex.y, x2:second.x, y2:second.y, class:'angle-line' });
+      Object.entries(state.points).forEach(([name, point]) => {
+        if (!required().includes(name)) return;
+        const circle = addSvg(overlay, 'circle', { cx:point.x, cy:point.y, r:9, class:'manual-point' + (name === state.selected ? ' active' : ''), 'data-point':name });
+        circle.addEventListener('pointerdown', startDrag);
+        const label = addSvg(overlay, 'text', { x:point.x + 12, y:point.y - 10, class:'point-label' }); label.textContent = pointLabel(name);
+      });
+      if (state.preview?.angle_deg != null && vertex) { const label = addSvg(overlay, 'text', { x:vertex.x + 14, y:vertex.y + 28, class:'angle-label' }); label.textContent = `${Number(state.preview.angle_deg).toFixed(1)}°`; }
+    }
+    function addSvg(overlay, type, attributes) { const element = document.createElementNS('http://www.w3.org/2000/svg', type); Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value)); overlay.appendChild(element); return element; }
+    function startDrag(event) {
+      event.preventDefault(); const name = event.currentTarget.dataset.point; const overlay = event.currentTarget.ownerSVGElement;
+      state.drag = { name, side: overlay === overlays.right ? 'right' : 'left' }; state.selected = name; overlay.setPointerCapture?.(event.pointerId); renderPointList();
+    }
+    function moveDrag(event) {
+      if (!state.drag) return;
+      const point = pointFromEvent(overlays[state.drag.side], event); if (!point) return;
+      if (invalidDepthAt(state.drag.side, point) === true) { rejectInvalidDepth(state.drag.side); return; }
+      state.points[state.drag.name] = point; renderOverlay(); renderPointList();
+    }
+    function finishDrag(event) {
+      if (!state.drag) return;
+      const overlay = overlays[state.drag.side]; if (overlay.hasPointerCapture?.(event.pointerId)) overlay.releasePointerCapture(event.pointerId);
+      state.drag = null; requestPreview();
+    }
+    function bindOverlay(overlay, side) {
+      overlay.addEventListener('pointerdown', event => {
+        if (side !== targetSide() || event.target.closest?.('[data-point]')) return;
+        if (!state.selected) return;
+        const point = pointFromEvent(overlay, event); if (!point) return;
+        if (invalidDepthAt(side, point) === true) { rejectInvalidDepth(side); return; }
+        event.preventDefault(); state.points[state.selected] = point; state.selected = missingPoints()[0] || state.selected; renderPointList(); renderOverlay(); requestPreview();
+      });
+      overlay.addEventListener('pointermove', moveDrag); overlay.addEventListener('pointerup', finishDrag); overlay.addEventListener('pointercancel', finishDrag);
+    }
+    bindOverlay(overlays.left, 'left'); bindOverlay(overlays.right, 'right');
+    function renderAngle() {
+      const preview = state.preview || {}; const angle = preview.angle_deg; const dimension = preview.angle_dimension || state.task?.angle_dimension || '2d';
+      const p3 = preview.points_3d || {};
+      const missingDepth = preview.missing_depth_points || [];
+      const missingManual = missingPoints();
+      $('depthReadout').textContent = dimension !== '3d' ? '' : missingManual.length ? '3-D point-cloud angle; depth will be sampled after all points are placed.' : missingDepth.length ? `3-D point-cloud depth unavailable for: ${missingDepth.map(displayPoint).join(', ')}` : angle != null ? `3-D point cloud · ${state.task.angle_points.map(name => `${displayPoint(name)}: ${p3[name] ? '[' + p3[name].map(value => Number(value).toFixed(3)).join(', ') + '] m' : 'no depth'}`).join('    ')}` : '3-D point-cloud angle is waiting for valid depth at every point.';
+      const targetModel = preview.mmpose || {};
+      const referenceModel = state.referenceMmpose || {};
+      const targetIsFront = taskView() === 'front';
+      const compareReferenceView = state.task?.compare_reference_view !== false;
+      const sideModel = targetIsFront ? referenceModel : targetModel;
+      const frontModel = compareReferenceView ? (targetIsFront ? targetModel : referenceModel) : {};
+      const sideDifference = preview.side_mmpose_error_deg != null ? Number(preview.side_mmpose_error_deg) : absoluteDifference(angle, sideModel.angle_deg);
+      const frontInvalid = frontReferenceIsInvalid();
+      const frontDifference = frontInvalid ? null : preview.front_mmpose_error_deg != null ? Number(preview.front_mmpose_error_deg) : absoluteDifference(angle, frontModel.angle_deg);
+      $('frontMmposeComparisonValue').closest('.comparison-value')?.classList.toggle('hidden', !compareReferenceView);
+      $('frontMmposeErrorValue').closest('.comparison-value')?.classList.toggle('hidden', !compareReferenceView);
+      $('frontMmposeComparisonValue').closest('.comparison-value')?.classList.toggle('invalid', frontInvalid && compareReferenceView);
+      $('frontMmposeErrorValue').closest('.comparison-value')?.classList.toggle('invalid', frontInvalid && compareReferenceView);
+      $('brettComparisonValue').textContent = angle == null ? '—' : `${Number(angle).toFixed(1)}°`;
+      $('mmposeComparisonValue').textContent = sideModel.angle_deg == null ? '—' : `${Number(sideModel.angle_deg).toFixed(1)}°`;
+      $('frontMmposeComparisonValue').textContent = frontInvalid ? 'INVALID' : frontModel.angle_deg == null ? '—' : `${Number(frontModel.angle_deg).toFixed(1)}°`;
+      $('sideMmposeErrorValue').textContent = sideDifference == null ? '—' : `${sideDifference.toFixed(1)}°`;
+      $('frontMmposeErrorValue').textContent = frontInvalid ? '—' : frontDifference == null ? '—' : `${frontDifference.toFixed(1)}°`;
+      $('frontMmposeComparisonLabel').textContent = frontInvalid ? 'MMPose 3D angle · front view (invalid)' : 'MMPose 3D angle · front view';
+      $('frontMmposeErrorLabel').textContent = frontInvalid ? 'not calculated · front view invalid' : 'annotated vs front-view MMPose';
+      const comparisonMessages = [];
+      if (!(targetIsFront && state.task.angle_method === 'front_abduction_manual') && sideModel.angle_deg == null && (sideModel.angle_method || sideModel.reason)) comparisonMessages.push(`Side-view MMPose: ${sideModel.reason || sideModel.calculation_note || 'angle unavailable'}`);
+      if (frontInvalid && compareReferenceView) comparisonMessages.push(`Front-view MMPose: ${frontReferenceInvalidMessage().toLowerCase()}.`);
+      else if (compareReferenceView && frontModel.angle_deg == null && (frontModel.angle_method || frontModel.reason)) comparisonMessages.push(`Front-view MMPose: ${frontModel.reason || frontModel.calculation_note || 'angle unavailable'}`);
+      $('comparisonStatus').textContent = comparisonMessages.join(' · ');
+      if (dimension === '3d' && !missingPoints().length && missingDepth.length) {
+        $('placementStatus').textContent = `No valid depth for: ${missingDepth.map(displayPoint).join(', ')}. Do not place points on black/no-depth areas.`;
+        $('placementStatus').className = 'status-row bad';
+      }
+    }
+    async function requestPreview(includeSubmitted = false) {
+      if (!state.task) return; const requestId = ++state.previewRequest;
+      try {
+        const result = await api('/api/tasks/' + encodeURIComponent(state.task.task_id) + '/preview', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ points:state.points }) });
+        if (requestId !== state.previewRequest) return; state.preview = result; state.referenceMmpose = result.reference_mmpose || state.referenceMmpose; renderAngle(); renderOverlay();
+        const invalidManualPoints = (result.missing_depth_points || []).filter(name => required().includes(name) && state.points[name]);
+        if (invalidManualPoints.length) {
+          const message = `Invalid depth for ${invalidManualPoints.map(pointLabel).join(', ')}. Choose another location outside the black/no-depth region.`;
+          $('placementStatus').textContent = message; $('placementStatus').className = 'status-row bad'; showToast(message, 'bad');
+        }
+      } catch (error) { if (requestId === state.previewRequest) { $('placementStatus').textContent = error.message; $('placementStatus').className = 'status-row bad'; } }
+    }
+    function resetPoints() { if (!state.task) return; if (!window.confirm(`Reset all points on the ${targetSide()} image?`)) return; state.points = {}; state.preview = null; state.selected = required()[0] || null; renderTask(); }
+    async function saveAnnotation(action) {
+      if (!state.task) return;
+      if (action === 'submit' && missingPoints().length) { $('placementStatus').textContent = 'Place: ' + missingPoints().map(displayPoint).join(', '); $('placementStatus').className = 'status-row bad'; return; }
+      const button = action === 'submit' ? $('submitButton') : $('draftButton'); button.disabled = true;
+      try {
+        const result = await api('/api/tasks/' + encodeURIComponent(state.task.task_id) + '/annotation', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ action, points:state.points, notes:$('annotationNotes').value }) });
+        state.annotation = result.annotation; state.points = {...savedPoints(result.annotation)}; state.preview = result; state.referenceMmpose = result.reference_mmpose || state.referenceMmpose; renderTask(); await loadTasks(state.task.task_id);
+        const comparisonParts = [];
+        if (result.side_mmpose_error_deg != null) comparisonParts.push(`side Δ ${Number(result.side_mmpose_error_deg).toFixed(1)}°`);
+        if (result.front_mmpose_error_deg != null) comparisonParts.push(`front Δ ${Number(result.front_mmpose_error_deg).toFixed(1)}°`);
+        const comparison = comparisonParts.length ? ` · ${comparisonParts.join(' · ')}` : '';
+        showToast(action === 'submit' ? `Annotation submitted · ${Number(result.angle_deg).toFixed(1)}°${comparison}` : 'Draft saved.');
+      } catch (error) { showToast(error.message, 'bad'); }
+      finally { button.disabled = false; }
+    }
+    $('loginForm').addEventListener('submit', signIn); $('logoutButton').addEventListener('click', logout); $('resetButton').addEventListener('click', resetPoints); $('draftButton').addEventListener('click', () => saveAnnotation('draft')); $('submitButton').addEventListener('click', () => saveAnnotation('submit')); checkSession();
+  </script>
+</body>
+</html>
