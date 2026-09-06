@@ -1,7 +1,0 @@
-lod=3
-n_joints=127
-n_verts=4899
-n_faces=9794
-param_transform_rows=889
-param_transform_cols=321
-skin_influences=8
