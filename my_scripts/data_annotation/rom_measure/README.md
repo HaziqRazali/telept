@@ -1,308 +1,288 @@
-# rom_measure - RGBD keypoint annotation webapp
+# rom_measure2
 
-Annotate semantic 2D keypoints on exact RGB video frames, pair them with the
-recording depth archive, and preview the shared RGBD angle calculation. Raw
-annotations are saved per user beside the NUS dataset. The Python evaluator
-then compares manual RGBD points against MMPose RGBD points.
-
-The original still-image endpoints and demo files in `images/` remain available
-for compatibility, but production NUS work uses the task browser. The server
-and offline report tools in this directory include their own recording,
-geometry, and evaluation helpers.
-
-## Roles and workflow
-
-Configure two passwords on the server:
-
-```bash
-ROM_ADMIN_PASSWORD=use-a-private-admin-password
-ROM_ANNOTATOR_PASSWORD=use-a-private-annotator-password
-```
-
-For temporary localhost testing, this checkout currently uses `123` for both
-admin and annotator passwords. Do not expose the service outside
-`127.0.0.1` while this testing mode is enabled; restore the environment-based
-passwords before deployment.
-
-The username `admin` (or `ROM_ADMIN_USERNAME`) with the admin password opens
-`/admin`, where fixed annotation tasks can be created. Any other username with
-the annotator password opens `/`, where only assigned tasks are visible.
-
-For backwards compatibility, `ROM_PASSWORD` remains an annotator-password
-fallback when the new role variables are not configured. Do not use that legacy
-fallback for a public deployment where task authoring must be protected.
-
-The blind workflow is enforced by the server:
-
-1. An annotator receives a predefined metric and exact frame.
-2. MMPose data is hidden while semantic RGB points are placed.
-3. `Finish annotation` locks the blind points and reveals the MMPose frame and
-  RGBD comparison.
-4. The annotator records agree or disagree, with an optional reason.
-
-MMPose values are not returned by the task endpoints before step 3.
-
-## Annotator workflow
-
-- Log in with an annotator username and the annotator password.
-- Choose an assigned task from the task list. The task already fixes the
-  recording, exact frame, and metric type.
-- Select a semantic point in the point list, then press Space over the RGB
-  image to place it. Selecting a point does not advance automatically after
-  placement. Drag with the left or middle mouse button to pan a zoomed frame;
-  `Reset all keypoints` clears the current task's manual placements, including
-  both poses in a paired task. Depth is read from the paired depth frame.
-- Save a draft if needed. MMPose remains hidden.
-- Click `Finish annotation` when the blind points are ready. The server locks
-  those points and reveals the synchronized MMPose frame and RGBD comparison.
-- Select `Agree` or `Disagree`; add a reason when useful.
-- Use the zoom controls to inspect either synchronized frame.
-
-MMPose values are never returned by task endpoints before `Finish annotation`.
-The webapp stores the blind points and review decision; the offline evaluator
-recomputes the authoritative angles.
-
-## Admin workflow
-
-- Log in as `admin` with the admin password, then open `/admin`.
-- Select a recording, scrub to the desired frame, choose a metric, and add a
-  task. The frame index is the authoritative value; the matching video
-  timestamp is shown beside it.
-- **Paired segment-excursion tests** (shoulder and hip flexion, extension,
-  abduction, and adduction) use a **T1=neutral/baseline / T2=peak task**. The
-  same segment endpoints are annotated in both frames: shoulder-to-elbow for
-  the shoulder and hip-to-knee for the hip. ROM is the angle between those two
-  segment vectors.
-- **Single-frame tests** (shoulder/hip internal or external rotation,
-  elbow/knee flexion or extension, and ankle dorsiflexion/plantarflexion) need
-  one fixed frame. Axial-rotation tests additionally use the nose, both
-  shoulders, and both hips to construct a torso reference frame; the upper-arm,
-  elbow, hip, and knee test postures should be standardized before annotating.
-- Annotators see both T1 and T2 images side by side for paired tasks. The
-  active panel is outlined and controls which pose the point list, notes, and
-  quality fields refer to; point placements remain separate for T1 and T2.
-- Save the task manifest. External annotators then see only those predefined
-  tasks and cannot choose another metric or arbitrary frame.
-
-Supported ROM metrics (both sides):
-
-| Region | Metric (right/left) | Task mode | Required points |
-|---|---|---|---|
-| Shoulder | flexion, extension, abduction, adduction | T1/T2 | shoulder, elbow in each frame |
-| Shoulder | internal/external rotation | single | nose, both shoulders, both hips, working elbow, wrist |
-| Elbow | flexion, extension | single | shoulder, elbow, wrist |
-| Hip | flexion, extension, abduction, adduction | T1/T2 | hip, knee in each frame |
-| Hip | internal/external rotation | single | nose, both shoulders, both hips, working knee, ankle |
-| Knee | flexion, extension | single | hip, knee, ankle |
-| Ankle | dorsiflexion, plantarflexion | single | knee, ankle, big-toe |
-
-## Dataset layout
-
-Set the root to the directory containing NUS subjects:
+`rom_measure2` is a small paired-video ROM annotation app. It is separate from
+the original `rom_measure` app and keeps its own uploads, task index, and
+annotations by default under:
 
 ```text
-<data-root>/
-  <subject>/
-    videos/<session_id>/<trial>.mp4
-    depth/<session_id>/depth.zip
-    camera_parameters/<session_id>/calibration.json
-    mmpose/<model>/<session_id>/<trial>.json
-    annotation_tasks/<session_id>/<trial>.json
-    annotations/<username>/<session_id>/<trial>.json
+/home/haziq/datasets/telept/data/milestone2/rom_measure2/
 ```
 
-For the current recording, annotations are stored at:
+On the first restart after this location change, an existing legacy
+`rom_measure2/data/` directory is moved there automatically.
+
+## Workflow
+
+The admin signs in at `/admin` and:
+
+1. imports one left session folder and one right/reference session folder (or
+   uploads a pair of videos as a fallback);
+2. scrubs the two videos independently with their sliders;
+3. chooses **Right shoulder flexion**, **Left shoulder flexion**, **Right
+   shoulder extension**, **Right elbow flexion**, **Right knee flexion**,
+   **Right knee extension**,
+   **Right shoulder abduction**, **Right shoulder internal rotation**,
+   **Right shoulder external rotation**, **Right hip abduction**, **Right hip internal rotation**,
+   **Right hip external rotation**, **Right hip flexion**, **Right ankle
+   dorsiflexion**, or **Right ankle plantarflexion**;
+4. saves the task for annotators.
+
+While scrubbing an imported pair, the admin page requests the MMPose result
+for the selected frame and draws its body skeleton over each video. A
+semi-transparent depth-color layer is also shown when that RGB frame has a
+depth frame: blue is nearer, red is farther, and black marks no-depth areas
+that should not be used for annotation. The relevant hip, shoulder, elbow, knee,
+and ankle landmarks are highlighted, and the frame status reports the exact MMPose `frame_id` or
+explains when no result exists.
+When an admin saves a task, the server also checks the task's relevant MMPose
+landmarks against the original floating-point depth. If a landmark falls in a
+black/no-depth region, the task is still saved but a red warning lists
+the affected view, frame, and keypoint on the saved-task card. This makes it
+easy to restore the task, choose a different frame, and delete the invalid
+task if necessary.
+
+If an iPad video needs conversion for Chrome, a progress bar appears beneath
+that video's controls while its H.264 proxy is created. MMPose results are
+preloaded for the admin pair and then selected from memory during playback, so
+the overlay does not wait for a request on every video update.
+
+The annotator signs in at `/` and receives the saved pair as exact source-frame
+images. This avoids browser video-seeking differences: the displayed image,
+the saved zero-based frame index, and its MMPose coordinates always refer to
+the same original RGB frame.
+For shoulder flexion, both views are shown, but only the left side-view image
+accepts input. Brett places anonymous points **A**, **B**, and **C** in order;
+the 3-D angle is calculated at **B**. The front frame is reference-only. Neutral
+is treated as 0°, so this is a single-frame/T1 comparison and does not use a
+T1/T2 difference.
+For right shoulder abduction, only the right/front image accepts input. Brett
+again places anonymous **A**, **B**, and **C** freely according to the clinical
+reference line; the left/side image is reference-only. The server samples the
+true 3-D point-cloud coordinates for those clicks, forms the torso frontal plane
+from the MMPose left/right hip and shoulder landmarks, projects both Brett
+vectors (A→B and B→C) into that plane, and measures the angle at B. Brett's
+points are not replaced by or forced onto MMPose landmarks.
+Right shoulder extension uses the same side-view instantaneous trunk-to-humerus
+angle as shoulder flexion, with the selected task identifying the movement. The
+right elbow-flexion task uses anonymous A-B-C points on the side view and
+calculates the 3-D included shoulder–elbow–wrist angle as flexion from full
+extension. Both tasks show the target side-view MMPose angle, the saved
+front-view MMPose angle, and both absolute differences.
+Right knee flexion follows the same side-view A-B-C workflow. Brett's points
+are compared with the 3-D `right_hip`, `right_knee`, and `right_ankle` MMPose
+angle on the saved side frame. The front frame is displayed for reference, but
+its knee-flexion result is marked invalid when the knee is occluded by the
+thigh.
+
+Right knee extension uses the same side-view A-B-C workflow and the same
+`right_hip`, `right_knee`, and `right_ankle` 3-D point-cloud geometry. Brett
+places **A** at the right hip, **B** at the right knee, and **C** at the right
+ankle. Full knee extension is reported as 0°, and MMPose supplies comparisons
+from both the saved side and front frames.
+
+Right hip flexion is a side-view A-B-C task. Brett places **A** at the right
+shoulder, **B** at the right hip, and **C** at the right knee; the angle is
+measured at **B**. MMPose uses the corresponding `right_shoulder`, `right_hip`,
+and `right_knee` point-cloud coordinates on both saved frames. At the hip, the
+included shoulder–hip–knee angle is converted to flexion as `180° − included
+angle`, so the standing neutral configuration is approximately 0°. No hidden
+neutral frame is required because the trunk is the anatomical reference. The
+front-view hip-flexion result is marked invalid when the shoulder is occluded
+by the thigh.
+
+Right ankle dorsiflexion and plantarflexion are side-view A-B-C tasks. Brett
+places **A** at the right knee, **B** at the right ankle, and **C** along the
+right foot toward the midpoint of the toes. MMPose uses the 3-D knee and ankle
+points plus the right heel and the midpoint of the right big and small toes to
+form the tibia and foot axes. The tibia–foot included angle is approximately
+90° in ankle neutral; the reported ROM is the absolute excursion from 90°, so
+neutral is 0°. These are side-view measurements; the front image remains
+reference-only and no front ankle angle is reported.
+
+For right hip abduction, no neutral frame is required. The selected peak frames
+remain the frames shown to Brett. Brett annotates the left/side image, while
+MMPose evaluates both saved views using their respective anatomical references.
+
+Brett places **A** at the right shoulder, **B** at the right hip, and **C** at
+the right knee. The 3-D angle is measured at **B** from the shoulder-to-hip
+trunk direction to the right thigh. Under the controlled supine protocol, the
+patient keeps the pelvis still, the knee extended, and the leg sliding along
+the floor, so this side-view trunk-to-thigh angle is used as the hip-abduction
+estimate. The side result uses only the reliable right shoulder, right hip,
+and right knee; it does not require the occluded contralateral landmarks. The
+front-view MMPose result remains available as an independent comparison: it
+forms the torso frontal plane from the bilateral shoulders and hips, projects
+the right hip-to-knee thigh vector into that plane, and measures it from the
+downward midpoint-shoulder-to-midpoint-hip pelvic reference. The result shows
+Brett's side-view angle, MMPose's side- and front-view angles, and both
+available absolute differences.
+
+For right shoulder internal and external rotation, only the right/front image
+accepts input. Brett places **A** at the shoulder, **B** at the elbow, and
+**C** at the wrist. A→B defines the humerus axis and B→C defines the forearm;
+the torso/chest normal from the MMPose hip/shoulder plane is projected into the
+plane perpendicular to the humerus, and the forearm is compared with that
+reference. These tasks show the front-view MMPose axial angle only. The selected
+task identifies internal versus external rotation; the displayed value is the
+unsigned excursion from the torso reference.
+
+For right hip internal and external rotation, only the left/side image accepts
+input and the MMPose comparison is also calculated from that same side frame.
+Brett places anonymous **A**, **B**, and **C** at the right hip, right knee,
+and right ankle. A→B defines the femur axis and B→C defines the lower-leg
+direction. This is an axial-rotation calculation around the femur, not the
+ordinary included angle at the knee. The admin selects a neutral frame in the
+left/side video before saving the task. The selected frame is compared with
+that hidden neutral frame, using the neutral lower-leg direction as the
+reference. This avoids using a one-sided shoulder-to-hip line as the body
+centreline; the front image remains reference-only and is not used for the
+hip-rotation angle or comparison. Existing hip-rotation tasks created before
+this selector was added continue to fall back to side frame 0.
+
+The neutral-frame selector is currently enabled only for right hip
+internal/external rotation. Hip-abduction tasks use anatomical references in
+both views; hip-rotation tasks require only a side neutral frame because their
+front image is reference-only.
+
+For imported sessions containing `mmpose/*/rgb/rgb.json`, the server maps the
+task's zero-based RGB frame to the JSON's one-based `frame_id`, reads the
+appropriate left/right hip, shoulder, and elbow keypoints, and runs the same
+angle calculation. For a side-view shoulder-flexion task, the annotator sees
+four results: Brett's annotated 3-D angle on the left frame, the side-view
+MMPose 3-D angle on that same frame, the independent front-view MMPose 3-D
+angle from the saved right frame, plus absolute differences from Brett's angle
+to each available MMPose result. MMPose is a validation reference; it does not
+replace Brett's saved annotation.
+RGBD data is used for the side-view trunk angles, 3-D plane projection, axial
+rotation, and included joint angles. The active 3-D templates require a valid
+depth frame; upload-only pairs cannot produce these true point-cloud angles.
+
+## Importing the milestone2 folders
+
+Use two paths in the admin page because each milestone2 session folder contains
+one RGB video. For example, the supplied folder can be entered as the left
+folder:
 
 ```text
-/home/haziq/datasets/telept/data/NUS/val/
-haziq_upperlimb_right_24082026/annotations/Haziq/
-session_1787566918897/dynamic_03.json
+/home/haziq/datasets/telept/data/milestone2/ipad1/030926_16-12_513_8EDDA9FF
 ```
 
-The server equivalent is under `/data/haziq/telept/data/NUS/val/`.
+The app discovers `rgb_video_*.mp4`, `depth_data_*`,
+`instr_matrix_*.json`, `rgb_instr_matrix_*.json`, and
+`mmpose/*/rgb/rgb.json` without copying the large files. The milestone2 depth
+stream is read as raw DEFLATE containing
+`320×240` little-endian `float32` depth frames. Its depth frame IDs are matched
+to RGB frame IDs through `instr_matrix_*.json`, and the stored landscape depth
+map is rotated 90° clockwise when mapping portrait RGB pixels. Existing pair
+indexes written by the earlier counter-clockwise implementation are normalized
+to this corrected transform when loaded.
+
+For safety, folder imports are limited to `ROM2_ALLOWED_FOLDER_ROOTS`, which
+defaults to `/home/haziq/datasets/telept/data`. Set it to a colon-separated
+list when the source folders live elsewhere.
+
+The iPad RGB videos are HEVC/H.265, which Chrome on Linux may not play. When
+an imported or uploaded video uses an unsupported codec, the server creates a
+browser-compatible H.264 proxy on first access under
+`/home/haziq/datasets/telept/data/milestone2/rom_measure2/browser_videos/`.
+This requires the system `ffmpeg` executable; the first access can take some
+time for a large 4K video. The proxy is used for browser playback on the admin
+page. Annotator frames are decoded directly from the original RGB file, so
+their coordinates are independent of proxy timing.
+
+For right shoulder flexion, Brett's A-B-C points are internally compared with:
+
+```text
+right_hip, right_shoulder, right_elbow
+```
+
+For left shoulder flexion, the corresponding model points are
+`left_hip, left_shoulder, left_elbow`. In either case, the side-view angle is
+the angle between the downward trunk reference (`shoulder → hip`) and the
+humerus (`shoulder → elbow`). The elbow is intentional: it represents the
+humerus endpoint used by the goniometer convention; the wrist is not used.
+
+The admin chooses the side and front frame independently because the cameras
+are not synchronized. The saved task stores both frame indices and timestamps;
+clicking a saved task in the admin list restores that exact frame pair. The
+admin can delete a saved task from this list; this removes it from the task
+index and annotator queue while retaining any existing annotation JSON.
+The target-view MMPose comparison is made only when the selected target frame
+has a matching MMPose record and valid depth at the model landmarks; if it does
+not, the comparison is marked unavailable.
+
+The shoulder angle is measured in camera-space 3-D between the downward trunk
+reference (`shoulder → hip`) and the humerus (`shoulder → elbow`), using the
+depth value sampled around each clicked pixel and the depth-camera intrinsics.
+The supplemental front-view shoulder-flexion angle forms the torso axes from
+both hips and both shoulders, removes the left/right component from the
+shoulder-to-elbow vector, and measures the remaining sagittal-plane vector
+against the downward torso axis. Its overlay is drawn from the midpoint of the
+two shoulders to the midpoint of the two hips, plus the target shoulder to
+elbow segment. It is intentionally displayed as a separate reference because
+the side and front frames are not synchronized and do not measure the same
+projected motion.
+For right shoulder abduction, MMPose is evaluated only on the right/front frame:
+its shoulder-to-elbow vector is projected into the same torso frontal plane and
+measured against the downward midpoint-shoulder-to-midpoint-hip reference.
+The annotator page therefore shows the front-view MMPose angle and its absolute
+difference from Brett's front-view 3-D angle; the side-view comparison remains
+blank for this task because it is not part of the measurement.
+For right hip abduction, MMPose is evaluated on both saved frames. On the front
+frame it forms a torso frontal plane from the bilateral shoulders and hips,
+projects the true 3-D right-hip-to-right-knee vector into that plane, and
+measures it from the downward midpoint-shoulder-to-midpoint-hip pelvic
+reference. On the side frame it uses the true 3-D right shoulder–right
+hip–right knee trunk/thigh angle. This side estimate relies on the controlled
+supine leg-slide protocol to isolate abduction and does not use a neutral frame.
+Elbow and knee flexion use the joint included angle converted to flexion from
+full extension. Ankle dorsiflexion/plantarflexion uses the tibia–foot included
+angle relative to the 90° neutral ankle position. Axial shoulder/hip rotation
+requires valid depth and a
+standardized rotation posture. The side-view hip axial angle is relative to the
+neutral frame and should be validated against clinical goniometer readings
+before being treated as a clinical measure.
 
 ## Run
 
-From this directory:
-
 ```bash
+cd /home/haziq/datasets/telept/my_scripts/data_annotation/rom_measure2
 python3 -m pip install -r requirements.txt
-ROM_DATA_ROOT=/data/haziq/telept/data/NUS/val \
-ROM_ADMIN_PASSWORD=admin-secret \
-ROM_ANNOTATOR_PASSWORD=annotator-secret \
-python3 server.py --host 0.0.0.0 --port 8090
+ROM2_ADMIN_PASSWORD=change-me \
+ROM2_ANNOTATOR_PASSWORD=annotator-password \
+python3 server.py --host 127.0.0.1 --port 8092
 ```
 
-Open `http://localhost:8090` for annotator tasks or `http://localhost:8090/admin`
-for task authoring. Expose that port through the appropriate SSH tunnel when
-needed. Remote port `8080` is occupied by another Dart service.
+Open `http://127.0.0.1:8092/admin` for task setup or
+`http://127.0.0.1:8092` for annotation. The local defaults are `admin` / `123`
+for the admin and any non-admin username / `123` for an annotator. Change the
+passwords before exposing the service.
 
-The default local root is inferred as `../../data/NUS/val` from the repository.
-Set `ROM_DATA_ROOT` explicitly when running from another checkout.
-
-### Current local milestone2 setup
-
-From this directory, stop any older server with `Ctrl+C`, then run:
+Optional settings:
 
 ```bash
-ROM_DATA_ROOT=/home/haziq/datasets/telept/data/milestone2/val \
-python3 server.py --host 127.0.0.1 --port 8091
+ROM2_STORAGE_DIR=/some/private/folder
+ROM2_ADMIN_USERNAME=admin
+ROM2_USERS="alice:alice-password,bob:bob-password"
+ROM2_MAX_UPLOAD_MB=2048
+ROM2_SECRET=use-a-long-random-secret
+ROM2_ALLOWED_FOLDER_ROOTS=/home/haziq/datasets/telept/data
 ```
 
-Open `http://127.0.0.1:8091/admin` for admin task authoring or
-`http://127.0.0.1:8091` for annotator tasks. In the current temporary
-localhost testing mode, the admin username is `admin` and both admin and
-annotator passwords are `123`.
-
-## Annotation schema
-
-Legacy free-form annotations use the schema below. Current task submissions use
-the task-review shape described after the evaluator command.
-
-```json
-{
-  "schema_version": 2,
-  "annotation_type": "rgbd_keypoints",
-  "subject": "haziq_upperlimb_right_24082026",
-  "session_id": "session_1787566918897",
-  "trial": "dynamic_03",
-  "username": "Haziq",
-  "active_metric": "right_shoulder_adduction",
-  "metrics": {
-    "right_shoulder_adduction": {
-      "t1": 310,
-      "t2": 394,
-      "frames": {
-        "310": {
-          "frame_index": 310,
-          "rgb_timestamp_sec": 10.33,
-          "depth_timestamp": 106930.47,
-          "points_2d": {
-            "right_shoulder": {"x": 328.2, "y": 497.3}
-          },
-          "quality": {"usable": true},
-          "notes": ""
-        }
-      }
-    }
-  }
-}
-```
-
-Coordinates are original RGB pixels, not displayed CSS coordinates. The
-annotation file is the source of truth. Depth-lifted 3D points and angles are
-recomputed by `my_scripts/data_annotation/rom_measure/evaluate_rgbd_annotations.py`.
-
-## Evaluation
-
-From the repository root:
-
-```bash
-python3 my_scripts/data_annotation/rom_measure/evaluate_rgbd_annotations.py \
-  --data-root /home/haziq/datasets/telept/data/NUS/val \
-  --subject haziq_upperlimb_right_24082026 \
-  --session-id session_1787566918897 \
-  --trial dynamic_03 \
-  --username Haziq \
-  --mode common_plane \
-  --output /tmp/rgbd_annotations.csv \
-  --summary-output /tmp/rgbd_summary.json
-```
-
-For single-frame axial-rotation tasks, `common_plane` uses manually annotated
-torso points for both manual and MMPose calculations, isolating limb-detector
-error. `independent` lets each point source construct its own torso frame.
-Mocap comparison remains a separate external-validity analysis.
-
-For task-review annotations, evaluate one task or all submitted tasks:
-
-```bash
-python3 my_scripts/data_annotation/rom_measure/evaluate_rgbd_annotations.py \
-  --data-root /home/haziq/datasets/telept/data/NUS/val \
-  --subject haziq_upperlimb_right_24082026 \
-  --session-id session_1787566918897 \
-  --trial dynamic_03 \
-  --username Haziq \
-  --task-id dynamic_03_right_elbow_flexion_394 \
-  --mode common_plane \
-  --output /tmp/rgbd_task.csv
-```
-
-The task annotation file stores the blind points separately from review data:
+The storage directory contains:
 
 ```text
-<subject>/annotations/<username>/task_reviews/<session_id>/<trial>.json
+rom_measure2/
+  uploads/<pair_id>/left.<ext>
+  uploads/<pair_id>/right.<ext>
+  browser_videos/<pair_id>/left.mp4
+  browser_videos/<pair_id>/right.mp4
+  pairs.json
+  tasks.json
+  annotations/<username>/<task_id>.json
 ```
 
-Each single-frame task entry includes `blind_points_2d`, `status`,
-`manual_angle_deg`, `mmpose_angle_deg`, `signed_error_deg`,
-`mmpose_reviewed`, `mmpose_agree`, and an optional `disagreement_reason`.
-Paired shoulder/hip segment entries instead contain
-`blind_points_2d_by_pose` for `t1` and `t2`, plus `manual_delta_deg`,
-`mmpose_delta_deg`, and the signed T1-to-T2 error. The original blind points
-are not replaced after MMPose is revealed.
-
-Admin task manifests are stored separately:
-
-```json
-{
-  "schema_version": 1,
-  "subject": "haziq_upperlimb_right_24082026",
-  "session_id": "session_1787566918897",
-  "trial": "dynamic_03",
-  "tasks": [
-    {
-      "task_id": "dynamic_03_right_elbow_flexion_394",
-      "metric": "right_elbow_flexion",
-      "frame_index": 394,
-      "enabled": true,
-      "notes": ""
-    }
-  ]
-}
-```
-
-They live at `<subject>/annotation_tasks/<session_id>/<trial>.json` and are
-written only by the admin role.
-
-For an annotated-versus-MMPose plot, use the separate report visualizer:
-
-```bash
-python3 my_scripts/data_annotation/rom_measure/plot_rgbd_annotation_comparison.py \
-  --data-root /home/haziq/datasets/telept/data/NUS/val \
-  --subject haziq_upperlimb_right_24082026 \
-  --session-id session_1787566918897 \
-  --trial dynamic_03 \
-  --username Haziq \
-  --metric right_shoulder_adduction \
-  --mode common_plane \
-  --output /tmp/right_shoulder_adduction_comparison.png
-```
-
-The annotation UI is for frame-level QA. The report visualizer is for plotting
-all annotated frames. The C3D viewer remains the external mocap comparison
-tool.
-
-## Multi-user and storage
-
-Each username has its own namespace:
-`annotations/<username>/<session_id>/<trial>.json`.
-
-- Admin password: `ROM_ADMIN_PASSWORD=...`.
-- Annotator password: `ROM_ANNOTATOR_PASSWORD=...`.
-- Legacy shared annotator password: `ROM_PASSWORD=changeme`.
-- Per-user passwords: `ROM_USERS="alice:pw1,bob:pw2"`.
-- No password: set neither variable.
-
-Do not commit raw videos, depth ZIPs, or production annotations. The repository
-already ignores `data/`; use `rsync` or `scp` to transfer annotations between
-the server and a local dataset copy.
-
-## Limitations
-
-- The current browser annotates RGB keypoints; it does not manually drag 3D
-  points.
-- Depth lens-distortion rectification is recorded as a pending calibration
-  step and must be enabled before final accuracy claims.
-- A 3-degree target should be reported only after checking annotation
-  repeatability and the manual RGBD error floor.
+Imported pairs keep references to the original session files; they are not
+copied into `uploads`. The saved annotation contains points on the task's
+target view, the derived 3-D points when depth is available, and the calculated
+angle. It does not contain annotation points from the non-target view.

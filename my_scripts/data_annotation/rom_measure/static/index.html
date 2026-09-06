@@ -1,215 +1,612 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ROM Measure - Blind RGBD annotation</title>
-<style>
-  :root { --bg:#111827; --panel:#1f2937; --panel2:#273449; --line:#3b4a61; --text:#e5e7eb; --muted:#9ca3af; --accent:#38bdf8; --gold:#fbbf24; --danger:#f87171; --good:#4ade80; }
-  * { box-sizing:border-box; }
-  html,body { height:100%; }
-  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.35 system-ui,-apple-system,sans-serif; overflow:hidden; }
-  button,input,select,textarea { font:inherit; }
-  button { border:1px solid var(--line); border-radius:5px; padding:6px 10px; color:var(--text); background:var(--panel2); cursor:pointer; }
-  button:hover { border-color:var(--accent); }
-  button.primary { color:#082f49; background:var(--accent); border-color:var(--accent); }
-  button.good { color:#052e16; background:var(--good); border-color:var(--good); }
-  button.danger { color:#450a0a; background:var(--danger); border-color:var(--danger); }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  input,select,textarea { width:100%; color:var(--text); background:#111827; border:1px solid var(--line); border-radius:5px; padding:6px 8px; }
-  textarea { min-height:60px; resize:vertical; }
-  label { color:var(--muted); font-size:12px; }
-  .app { display:grid; grid-template-columns:260px minmax(0,1fr) 320px; height:100%; }
-  aside { min-width:0; padding:14px; background:var(--panel); overflow:auto; }
-  .tasks { border-right:1px solid var(--line); }
-  .inspector { border-left:1px solid var(--line); }
-  main { min-width:0; min-height:0; overflow:hidden; display:grid; grid-template-rows:auto 1fr auto; }
-  .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:10px 14px; border-bottom:1px solid var(--line); }
-  .toolbar .user { margin-left:auto; color:var(--muted); }
-  .section { border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:14px; }
-  h1,h2,h3 { margin:0 0 10px; } h1 { font-size:18px; } h2 { font-size:14px; } h3 { color:var(--muted); font-size:11px; letter-spacing:.08em; text-transform:uppercase; }
-  .muted { color:var(--muted); font-size:12px; }
-  .task-list { display:grid; gap:6px; margin-top:12px; }
-  .task-card { width:100%; padding:9px; text-align:left; display:grid; gap:3px; white-space:normal; }
-  .task-card.active { border-color:var(--accent); background:#164e63; }
-  .task-card.submitted { border-color:#a16207; }
-  .task-card.reviewed { border-color:#166534; }
-  .task-card small { color:var(--muted); }
-  .stage-wrap { min-width:0; min-height:0; overflow:auto; display:flex; align-items:center; justify-content:center; gap:18px; padding:18px; }
-  .stage-wrap.zoomed { justify-content:flex-start; }
-  .stage-wrap.vertical-overflow { align-items:flex-start; }
-  .frame-panel { min-width:0; flex:0 1 470px; display:grid; gap:6px; align-content:center; }
-  .frame-panel.active-pose { outline:1px solid var(--accent); outline-offset:4px; border-radius:6px; }
-  .frame-title { color:var(--muted); font-size:12px; text-align:center; }
-  .stage { position:relative; max-width:100%; line-height:0; }
-  .stage, .stage img { user-select:none; -webkit-user-select:none; -webkit-user-drag:none; }
-  .stage-wrap.pan-ready .stage { cursor:crosshair; }
-  .stage-wrap.panning .stage { cursor:grabbing; }
-  .stage.sized { max-width:none; flex:none; }
-  #stage.sized > img, #stageT2.sized > img, #qaStage.sized > img { width:100%; height:100%; max-width:none; max-height:none; }
-  #rgb,#rgbT2,#qaRgb { display:block; max-width:min(100%,900px); max-height:calc(100vh - 190px); width:auto; height:auto; }
-  #depth,#depthT2,#qaDepth { position:absolute; inset:0; display:none; width:100%; height:100%; opacity:.34; pointer-events:none; }
-  #svg,#svgT2,#qaSvg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; touch-action:none; }
-  .manual-point { fill:#f43f5e; stroke:#fff; stroke-width:2; cursor:grab; }
-  .manual-point.active { fill:var(--gold); }
-  .manual-label { fill:#fff; font-size:17px; font-weight:700; paint-order:stroke; stroke:#111827; stroke-width:4px; pointer-events:none; }
-  .pred-point { fill:none; stroke:#a78bfa; stroke-width:3; pointer-events:none; }
-  .pred-label { fill:#c4b5fd; font-size:14px; paint-order:stroke; stroke:#111827; stroke-width:3px; pointer-events:none; }
-  .framebar { display:flex; justify-content:center; gap:10px; align-items:center; padding:8px 14px; border-top:1px solid var(--line); }
-  .pose-controls { display:flex; gap:6px; align-items:center; }
-  .pose-controls button.active { border-color:var(--accent); background:#164e63; }
-  .zoom-controls { display:flex; gap:8px; align-items:center; margin-left:auto; }
-  .zoom-controls button { min-width:30px; padding:5px 8px; }
-  .reset-zoom { margin-left:8px; }
-  .toolbar .user { margin-left:8px; }
-  #zoomValue { min-width:48px; color:var(--muted); text-align:center; }
-  .point-row { display:grid; grid-template-columns:10px 1fr auto; gap:7px; align-items:center; margin:6px 0; }
-  .point-dot { width:10px; height:10px; border-radius:50%; background:var(--danger); }
-  .point-row.complete .point-dot { background:var(--good); }
-  .point-row button { padding:3px 7px; font-size:12px; }
-  .metric-value { font-size:27px; color:var(--accent); font-weight:700; margin:6px 0; }
-  .metric-value.invalid { color:var(--danger); }
-  .comparison { display:grid; gap:4px; margin:8px 0; }
-  .comparison .big { font-size:20px; font-weight:700; }
-  .comparison .difference { color:var(--gold); font-weight:700; }
-  .quality { display:grid; gap:6px; padding:9px; background:#172033; border:1px solid var(--line); border-radius:5px; }
-  .quality.good { border-color:#166534; }
-  .quality.bad { border-color:#991b1b; }
-  .review-panel { display:none; padding:10px; background:#172033; border:1px solid var(--gold); border-radius:5px; }
-  .review-panel.show { display:block; }
-  .review-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px; }
-  #login { position:fixed; inset:0; z-index:20; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.74); }
-  #login.show { display:flex; }
-  .login-card { width:min(340px,92vw); padding:22px; background:var(--panel); border:1px solid var(--line); border-radius:8px; }
-  #status { position:fixed; left:50%; bottom:18px; z-index:30; transform:translateX(-50%); display:none; max-width:min(90vw,760px); padding:10px 16px; border-radius:6px; background:#14532d; border:1px solid #22c55e; color:#dcfce7; }
-  #status.show { display:block; } #status.unsaved { background:#713f12; border-color:#f59e0b; color:#fef3c7; } #status.failed { background:#7f1d1d; border-color:#ef4444; color:#fee2e2; }
-  @media(max-width:1100px) { body { overflow:auto; } .app { grid-template-columns:230px minmax(0,1fr); min-height:100%; height:auto; } .inspector { grid-column:1/-1; border-left:0; border-top:1px solid var(--line); } main { min-height:650px; } }
-  @media(max-width:700px) { .app { display:block; } aside { border:0; border-bottom:1px solid var(--line); } main { min-height:580px; } .stage-wrap { display:grid; justify-items:center; } .frame-panel { width:100%; } .zoom-controls { margin-left:0; } }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ROM Measure 2</title>
+  <style>
+    :root {
+      --bg: #0d1420;
+      --panel: #151f2e;
+      --panel-2: #1d2a3d;
+      --line: #314157;
+      --text: #e8eef7;
+      --muted: #91a0b5;
+      --accent: #67d5ff;
+      --accent-dark: #0b3445;
+      --good: #62dc9b;
+      --danger: #ff8d8d;
+      --gold: #f4c76b;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, textarea { font: inherit; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px 12px;
+      color: var(--text);
+      background: var(--panel-2);
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button:disabled { cursor: default; opacity: .55; }
+    button.primary { color: var(--accent-dark); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+    button.small { padding: 5px 8px; font-size: 12px; }
+    input, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 8px 9px; color: var(--text); background: #0d1725; }
+    textarea { min-height: 72px; resize: vertical; }
+    label { color: var(--muted); font-size: 12px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 16px; }
+    h3 { margin-bottom: 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .muted { color: var(--muted); }
+    .hidden { display: none !important; }
+    .login-layer { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgba(6, 10, 16, .94); }
+    .login-card { width: min(390px, 100%); padding: 26px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 20px 60px #0007; }
+    .login-card h1 { margin-bottom: 5px; }
+    .login-card p { margin-bottom: 18px; color: var(--muted); }
+    .field { display: grid; gap: 5px; margin: 12px 0; }
+    .login-card button { width: 100%; margin-top: 6px; }
+    .error { min-height: 20px; margin-top: 10px; color: var(--danger); font-size: 13px; }
+    .app { height: 100%; display: grid; grid-template-rows: auto 1fr; }
+    .topbar { display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: #111b2a; }
+    .topbar .user { margin-left: auto; color: var(--muted); }
+    .shell { min-height: 0; display: grid; grid-template-columns: 290px minmax(0, 1fr); }
+    aside { min-width: 0; overflow: auto; padding: 16px; border-right: 1px solid var(--line); background: var(--panel); }
+    main { min-width: 0; overflow: auto; padding: 18px; }
+    .section { margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+    .section > h2 { margin-bottom: 7px; }
+    .task-list { display: grid; gap: 8px; margin-top: 12px; }
+    .task-button { width: 100%; text-align: left; }
+    .task-button.active { border-color: var(--accent); background: #123a4b; }
+    .task-button strong, .task-button small { display: block; }
+    .task-button small { margin-top: 3px; color: var(--muted); }
+    .task-button .submitted { color: var(--good); }
+    .empty { display: grid; place-items: center; min-height: 300px; padding: 30px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); text-align: center; }
+    .workspace-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
+    .workspace-head .meta { margin-left: auto; color: var(--muted); font-size: 12px; text-align: right; }
+    .instructions { margin-bottom: 14px; padding: 10px 12px; border-left: 3px solid var(--accent); border-radius: 5px; color: #c7d7e9; background: #111f30; }
+    .video-grid { display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap: 14px; }
+    .video-card, .annotation-panel { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+    .video-card-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    .video-card-head strong { color: var(--accent); }
+    .video-card-head span { margin-left: auto; max-width: 62%; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+    .annotation-banner { display: flex; align-items: center; justify-content: center; min-height: 68px; margin: 10px 12px 0; padding: 10px 14px; border: 4px solid #ff4d5d; border-radius: 8px; color: #fff; background: #5a141e; box-shadow: 0 0 0 2px #ff4d5d33, 0 5px 18px #0005; font-size: clamp(24px, 3.5vw, 42px); font-weight: 900; line-height: 1.1; text-align: center; }
+    .view-warning { display: flex; align-items: center; justify-content: center; min-height: 58px; margin: 10px 12px 0; padding: 10px 14px; border: 4px solid #ff4d5d; border-radius: 8px; color: #fff; background: #5a141e; box-shadow: 0 0 0 2px #ff4d5d33, 0 5px 18px #0005; font-size: clamp(20px, 2.8vw, 34px); font-weight: 900; line-height: 1.1; text-align: center; text-transform: uppercase; }
+    .stage { position: relative; width: 100%; background: #05080c; line-height: 0; }
+    .stage img { display: block; width: 100%; height: auto; object-fit: contain; }
+    .stage .depth-overlay { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; opacity: .48; }
+    .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+    .stage svg.inactive { pointer-events: none; }
+    .fixed-frame { padding: 9px 12px 11px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .depth-info { padding: 0 12px 10px; color: #c7d7e9; font-size: 12px; }
+    .annotation-panel { display: grid; gap: 14px; margin-top: 16px; padding: 14px; }
+    .annotation-head { display: flex; align-items: baseline; gap: 12px; }
+    .annotation-head .muted { margin-left: auto; font-size: 12px; }
+    .point-list { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 8px; }
+    .point-button { display: flex; align-items: center; gap: 8px; text-align: left; }
+    .point-button.selected { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+    .point-button.done { color: var(--good); }
+    .dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--line); }
+    .point-button.done .dot { background: var(--good); }
+    .status-row { min-height: 22px; color: var(--muted); }
+    .status-row.bad { color: var(--danger); }
+    .status-row.good { color: var(--good); }
+    .depth-readout { color: var(--muted); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+    .actions { display: flex; align-items: center; gap: 9px; }
+    .actions .muted { margin-left: auto; font-size: 12px; }
+    .manual-point { fill: #f8d66d; stroke: #111827; stroke-width: 3; cursor: grab; }
+    .manual-point.active { fill: #fff; stroke: var(--gold); }
+    .angle-line { fill: none; stroke: #f8d66d; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+    .point-label { fill: #fff6cf; font: 700 18px system-ui, sans-serif; paint-order: stroke; stroke: #111827; stroke-width: 4px; }
+    .angle-label { fill: #67d5ff; font: 700 34px system-ui, sans-serif; paint-order: stroke; stroke: #111827; stroke-width: 7px; }
+    .model-point { fill: #69e6c1; stroke: #06241f; stroke-width: 3; opacity: .95; }
+    .model-point-label { fill: #b8ffe6; font: 700 17px system-ui, sans-serif; paint-order: stroke; stroke: #111827; stroke-width: 4px; }
+    .model-line { fill: none; stroke: #69e6c1; stroke-width: 3; stroke-dasharray: 9 6; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+    .model-angle-label { fill: #69e6c1; font: 700 29px system-ui, sans-serif; paint-order: stroke; stroke: #111827; stroke-width: 7px; }
+    .torso-plane { fill: #f4c76b; fill-opacity: .22; stroke: #f4c76b; stroke-width: 5; stroke-linejoin: round; opacity: .9; }
+    .comparison-box { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #101a28; }
+    .comparison-box h3 { margin: 0; }
+    .comparison-heading { margin-top: 2px !important; }
+    .comparison-values { display: grid; gap: 8px; }
+    .angle-values { grid-template-columns: repeat(3, minmax(110px, 1fr)); }
+    .difference-values { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+    .comparison-value { padding: 8px; border-radius: 6px; background: #172437; }
+    .comparison-value.invalid { border: 2px solid #ff4d5d; background: #3b1820; }
+    .comparison-value strong, .comparison-value span { display: block; }
+    .comparison-value strong { color: var(--accent); font-size: 18px; font-variant-numeric: tabular-nums; }
+    .comparison-value.invalid strong { color: #ff8d8d; }
+    .difference-values .comparison-value strong { color: var(--gold); }
+    .comparison-value span { color: var(--muted); font-size: 11px; }
+    .comparison-status { min-height: 18px; color: var(--muted); font-size: 12px; }
+    #toast { position: fixed; right: 18px; bottom: 18px; z-index: 30; max-width: min(440px, calc(100vw - 36px)); padding: 11px 14px; border: 1px solid var(--line); border-radius: 8px; background: #172437; box-shadow: 0 8px 30px #0008; }
+    #toast.good { border-color: var(--good); }
+    #toast.bad { border-color: var(--danger); color: #ffd1d1; }
+    @media (max-width: 1100px) {
+      .angle-values { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+    }
+    @media (max-width: 820px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { max-height: none; border-right: 0; border-bottom: 1px solid var(--line); }
+      .video-grid { grid-template-columns: 1fr; }
+      .point-list { grid-template-columns: 1fr; }
+      .angle-values, .difference-values { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
-<div id="login">
-  <form class="login-card" onsubmit="event.preventDefault(); doLogin();">
-    <h1>ROM Measure</h1>
-    <p class="muted">Blind RGBD annotation</p>
-    <div style="display:grid;gap:4px;margin:9px 0;"><label for="username">Username</label><input id="username" autocomplete="username" required></div>
-    <div style="display:grid;gap:4px;margin:9px 0;"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password"></div>
-    <button class="primary" type="submit">Log in</button>
-  </form>
-</div>
-<div id="status"></div>
-<div class="app">
-  <aside class="tasks">
-    <h1>RGBD ROM</h1>
-    <p class="muted">Complete the assigned frames. MMPose appears only after you finish a blind annotation.</p>
-    <div style="display:flex;gap:6px;"><button onclick="loadTasks()">Refresh</button><button onclick="logout()">Log out</button></div>
-    <div id="taskList" class="task-list"></div>
-  </aside>
-  <main>
-    <div class="toolbar">
-      <strong id="taskTitle">No task selected</strong>
-      <span id="taskStatus" class="muted"></span>
-      <div class="zoom-controls"><button onclick="zoomOut()" title="Zoom out">-</button><span id="zoomValue">100%</span><button onclick="zoomIn()" title="Zoom in">+</button></div><button class="reset-zoom" onclick="resetZoom()">Reset zoom</button>
-      <span id="currentUser" class="user"></span>
-    </div>
-    <div class="stage-wrap">
-      <div id="manualPanel" class="frame-panel">
-        <div id="manualFrameTitle" class="frame-title">Annotation frame</div>
-        <div id="stage" class="stage" data-pose="frame" title="Select a point first, then press Space to place it. Drag with the left mouse button after zooming to pan"><img id="rgb" draggable="false" alt="RGB task frame"><img id="depth" draggable="false" alt="Depth overlay"><svg id="svg" data-pose="frame" aria-label="blind manual annotation"></svg></div>
-      </div>
-      <div id="pairedT2Panel" class="frame-panel paired-frame-panel" style="display:none">
-        <div id="pairedT2Title" class="frame-title">T2 Peak / end range</div>
-        <div id="stageT2" class="stage" data-pose="t2" title="Select a point first, then press Space to place it. Drag with the left mouse button after zooming to pan"><img id="rgbT2" draggable="false" alt="RGB T2 task frame"><img id="depthT2" draggable="false" alt="Depth T2 overlay"><svg id="svgT2" data-pose="t2" aria-label="blind manual annotation for T2"></svg></div>
-      </div>
-      <div id="qaPanel" class="frame-panel" style="display:none">
-        <div class="frame-title">MMPose QA frame (confidence >= 0.5)</div>
-        <div id="qaStage" class="stage" title="Drag with the left mouse button after zooming to pan"><img id="qaRgb" draggable="false" alt="MMPose QA task frame"><img id="qaDepth" draggable="false" alt="MMPose QA depth overlay"><svg id="qaSvg" aria-label="MMPose estimate"></svg></div>
-      </div>
-    </div>
-    <div class="framebar"><span id="frameInfo" class="muted">Select a task</span><div id="poseControls" class="pose-controls" style="display:none"><button id="poseT1" onclick="selectPose('t1')">T1</button><button id="poseT2" onclick="selectPose('t2')">T2</button><span id="poseInfo" class="muted"></span></div><button onclick="toggleDepth()" id="depthButton">Show depth</button><button onclick="saveDraft()" id="draftButton">Save draft</button></div>
-  </main>
-  <aside class="inspector">
-    <section class="section"><h3>Step 1: task</h3><div id="taskInfo" class="muted">Choose an assigned task.</div><div id="taskPoseHint" class="muted"></div></section>
-    <section class="section"><h3>Step 2: blind annotation</h3><div class="muted">Mark the required body points on the person in the image. For tests with two poses (T1/T2), both images are shown and points are saved separately for each pose. Click a frame or its T1/T2 button to work on it. The pose-estimator results will be hidden until you finish the annotation.</div><button class="danger" style="margin-top:9px;width:100%;" onclick="resetKeypoints()" id="resetKeypointsButton" disabled>Reset all keypoints</button><div id="pointList"></div><div id="manualAngle" class="metric-value">-</div><div id="quality" class="quality"><span class="muted">No task selected.</span></div><button class="primary" style="margin-top:9px;width:100%;" onclick="finishAnnotation()" id="finishButton" disabled>Finish annotation</button></section>
-    <section id="reviewSection" class="section"><h3>Step 3: MMPose review</h3><div id="comparison" class="comparison"></div><div id="reviewPanel" class="review-panel"><div class="muted">The blind annotation is locked. Decide whether the MMPose estimate is acceptable.</div><div class="review-actions"><button class="good" onclick="submitReview('agree')">Agree</button><button class="danger" onclick="showDisagreement()">Disagree</button></div><div id="disagreementBox" style="display:none;margin-top:8px;"><div class="field"><label for="disagreementReason">Reason</label><textarea id="disagreementReason" placeholder="Optional explanation"></textarea></div><button class="danger" onclick="submitReview('disagree')">Submit disagreement</button></div></div><div id="reviewedMessage" class="muted"></div></section>
-    <section><h3>Frame notes</h3><label style="display:flex;gap:6px;align-items:center;"><input id="usable" type="checkbox" style="width:auto;" onchange="updateDraftMetadata()"> Usable</label><div style="display:grid;gap:4px;margin-top:8px;"><label for="notes">Notes</label><textarea id="notes" placeholder="Occlusion, uncertainty, or other note" onchange="updateDraftMetadata()"></textarea></div></section>
-  </aside>
-</div>
-<script>
-const $ = selector => document.querySelector(selector);
-const stage = $('#stage'); const svg = $('#svg'); const rgb = $('#rgb'); const depth = $('#depth');
-const stageT2 = $('#stageT2'); const svgT2 = $('#svgT2'); const rgbT2 = $('#rgbT2'); const depthT2 = $('#depthT2');
-const qaStage = $('#qaStage'); const qaSvg = $('#qaSvg'); const qaRgb = $('#qaRgb'); const qaDepth = $('#qaDepth');
-const stageWrap = document.querySelector('.stage-wrap'); const manualPanel = $('#manualPanel'); const pairedT2Panel = $('#pairedT2Panel'); const qaPanel = $('#qaPanel');
-const MIN_ZOOM = 0.5; const MAX_ZOOM = 10; const ZOOM_STEP = 0.25;
-let tasks = []; let currentTask = null; let taskPayload = null; let entry = null; let activePose = 'frame'; let predictedPoints = {}; let predictedPointsByPose = {}; let comparison = null; let selectedPoint = null; let dirty = false; let saveTimer = null; let previewTimer = null; let zoom = 1; let baseStageSize = null; let depthVisible = false; let drag = null; let pan = null; let panJustEnded = false; let spacePressed = false; let lastPointer = null; let requestNumber = 0;
+  <div id="loginLayer" class="login-layer">
+    <form id="loginForm" class="login-card">
+      <h1>ROM Measure 2</h1>
+      <p>Annotator view</p>
+      <div class="field"><label for="loginUser">Username</label><input id="loginUser" autocomplete="username" required></div>
+      <div class="field"><label for="loginPassword">Password</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
+      <button class="primary" type="submit">Sign in</button>
+      <div id="loginError" class="error"></div>
+    </form>
+  </div>
 
-function showStatus(kind,message,timeout=3500) { const node=$('#status'); node.className='show '+kind; node.textContent=message; clearTimeout(node.timer); if(timeout)node.timer=setTimeout(()=>node.className='',timeout); }
-function esc(value) { return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-async function api(path,options={}) { const response=await fetch(path,options); if(response.status===401){$('#login').classList.add('show');throw new Error('unauthorized');} if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.error||response.statusText);} return response.headers.get('content-type')?.startsWith('image/')?response.blob():response.json(); }
-async function doLogin() { const response=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('#username').value,password:$('#password').value})}); if(!response.ok){showStatus('failed','Login failed',0);return;} const data=await response.json(); if(data.role==='admin'){location.href='/admin';return;} $('#currentUser').textContent=data.user; $('#login').classList.remove('show'); $('#username').value='';$('#password').value=''; await loadTasks(); }
-async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
-async function loadTasks(){try{const data=await api('/api/tasks');tasks=data.tasks;renderTaskList();if(!currentTask&&tasks.length)await selectTask(tasks[0]);}catch(error){showStatus('failed',error.message,0);}}
-function renderTaskList(){const list=$('#taskList');list.innerHTML='';if(!tasks.length){list.innerHTML='<span class="muted">No assigned tasks</span>';return;}tasks.forEach(task=>{const button=document.createElement('button');button.className='task-card '+(currentTask?.task_id===task.task_id?'active ':'')+task.status;const frameText=task.frame_mode==='paired'?`T1 ${task.t1_frame_index} (${Number(task.t1_timestamp_sec||0).toFixed(3)} s) -> T2 ${task.t2_frame_index} (${Number(task.t2_timestamp_sec||0).toFixed(3)} s)`:`Frame ${task.frame_index} (${Number(task.timestamp_sec||0).toFixed(3)} s)`;button.innerHTML=`<strong>${esc(task.metric_label)}</strong><small>${frameText}</small><small>${esc(task.status)}</small>`;button.onclick=()=>selectTask(task);list.appendChild(button);});}
-function taskQuery(task=currentTask){return `subject=${encodeURIComponent(task.subject)}&session_id=${encodeURIComponent(task.session_id)}&trial=${encodeURIComponent(task.trial)}&task_id=${encodeURIComponent(task.task_id)}`;}
-async function selectTask(task){await saveIfDirty();currentTask=task;activePose=task.frame_mode==='paired'?'t1':'frame';entry=null;taskPayload=null;predictedPoints={};predictedPointsByPose={};comparison=null;selectedPoint=null;depthVisible=false;[depth,depthT2,qaDepth].forEach(element=>element.style.display='none');$('#depthButton').textContent='Show depth';$('#taskTitle').textContent=task.metric_label;$('#taskStatus').textContent=`Task ${task.task_id}`;$('#taskInfo').textContent=task.frame_mode==='paired'?`${task.subject} / ${task.session_id} / ${task.trial} / T1 ${task.t1_frame_index} (${Number(task.t1_timestamp_sec||0).toFixed(3)} s) / T2 ${task.t2_frame_index} (${Number(task.t2_timestamp_sec||0).toFixed(3)} s)`:`${task.subject} / ${task.session_id} / ${task.trial} / frame ${task.frame_index} (${Number(task.timestamp_sec||0).toFixed(3)} s)`;try{taskPayload=await api(`/api/task?${taskQuery(task)}`);entry=taskPayload.entry||{status:taskPayload.status,blind_points_2d:taskPayload.blind_points_2d||{},blind_points_2d_by_pose:taskPayload.blind_points_2d_by_pose||{},quality:{},quality_by_pose:{},notes:'',notes_by_pose:{}};setReviewState();await loadTaskFrame();if(submitted())await loadReview();render();}catch(error){showStatus('failed',error.message,0);}}
-function isPairedTask(){return currentTask?.frame_mode==='paired';}
-function poseDefinition(pose=activePose){const key=isPairedTask()?pose:'frame';return currentTask?.poses?.[key]||null;}
-function poseFrame(pose=activePose){return poseDefinition(pose)?.frame_index ?? currentTask?.frame_index;}
-function manualView(pose=activePose){return isPairedTask()&&pose==='t2'?{panel:pairedT2Panel,stage:stageT2,image:rgbT2,depth:depthT2,svg:svgT2}:{panel:manualPanel,stage, image:rgb,depth,svg};}
-function posePoints(create=true,pose=activePose){if(!entry)return {};if(isPairedTask()){const key=pose==='t2'?'t2':'t1';entry.blind_points_2d_by_pose=entry.blind_points_2d_by_pose||{};if(create&&!entry.blind_points_2d_by_pose[key])entry.blind_points_2d_by_pose[key]={};return entry.blind_points_2d_by_pose[key]||{};}entry.blind_points_2d=entry.blind_points_2d||{};return entry.blind_points_2d;}
-function poseQuality(create=true,pose=activePose){if(!entry)return {};if(isPairedTask()){const key=pose==='t2'?'t2':'t1';entry.quality_by_pose=entry.quality_by_pose||{};if(create&&!entry.quality_by_pose[key])entry.quality_by_pose[key]={};return entry.quality_by_pose[key]||{};}entry.quality=entry.quality||{};return entry.quality;}
-function poseNotes(pose=activePose){if(!entry)return '';if(isPairedTask())return entry.notes_by_pose?.[pose==='t2'?'t2':'t1']||'';return entry.notes||'';}
-function required(pose=activePose){if(isPairedTask()){const d=poseDefinition(pose);return d?.required_points||currentTask?.required_points||[];}return currentTask?.required_points||[];}
-function points(pose=activePose){return posePoints(true,pose);} function submitted(){return ['submitted','reviewed'].includes(entry?.status);}
-function poseTitle(pose){const definition=poseDefinition(pose);if(!definition)return 'Annotation frame';const role=pose==='t1'?'T1 Neutral / baseline':pose==='t2'?'T2 Peak / end range':'Annotation frame';return `${role} · frame ${definition.frame_index} · ${Number(definition.timestamp_sec).toFixed(3)} s`;}
-function updatePairedPanelLayout(){const paired=isPairedTask();manualPanel.style.display='grid';pairedT2Panel.style.display=paired?'grid':'none';manualPanel.classList.toggle('active-pose',paired&&activePose==='t1');pairedT2Panel.classList.toggle('active-pose',paired&&activePose==='t2');stage.dataset.pose=paired?'t1':'frame';svg.dataset.pose=paired?'t1':'frame';$('#manualFrameTitle').textContent=paired?poseTitle('t1'):'Annotation frame';if(paired){$('#pairedT2Title').textContent=poseTitle('t2');stageT2.dataset.pose='t2';svgT2.dataset.pose='t2';}else{$('#pairedT2Title').textContent='T2 Peak / end range';}qaPanel.style.display=paired?'none':(submitted()?'grid':'none');}
-function activatePose(pose,renderNow=true){if(!isPairedTask()||!currentTask?.poses?.[pose])return;if(pose===activePose)return;activePose=pose;selectedPoint=null;updatePoseControls();updatePairedPanelLayout();if(renderNow)render();}
-async function selectPose(pose){if(!isPairedTask()||!currentTask?.poses?.[pose]||pose===activePose)return;await saveIfDirty();activatePose(pose);}
-function releaseStageLayout(){[stage,stageT2,qaStage].forEach(element=>{element.classList.remove('sized');element.style.width='';element.style.height='';});[manualPanel,pairedT2Panel,qaPanel].forEach(panel=>{panel.style.width='';panel.style.flex='';});stageWrap.classList.remove('zoomed','vertical-overflow');}
-function measureStageBase(){if(stage.classList.contains('sized')||stageT2.classList.contains('sized')||qaStage.classList.contains('sized'))releaseStageLayout();const bounds=rgb.getBoundingClientRect();if(!bounds.width||!bounds.height)return;baseStageSize={width:bounds.width,height:bounds.height};applyZoom();}
-function setFrameImage(image,overlay,url,n,afterLoad){image.onload=()=>{if(n!==requestNumber)return;overlay.setAttribute('viewBox',`0 0 ${image.naturalWidth} ${image.naturalHeight}`);if(afterLoad)afterLoad();else render();};image.src=url;}
-async function loadTaskFrame(){const n=++requestNumber;const base=`/api/task-frame?${taskQuery()}&v=${n}`;if(isPairedTask()){setFrameImage(rgb,svg,`${base}&pose=t1`,n,()=>{measureStageBase();render();});setFrameImage(rgbT2,svgT2,`${base}&pose=t2`,n,()=>{applyZoom();render();});}else{setFrameImage(rgb,svg,base,n,()=>{measureStageBase();render();});setFrameImage(qaRgb,qaSvg,base,n,()=>{applyZoom();});}}
-function setReviewState(){const locked=submitted();if(locked)zoom=1;$('#finishButton').disabled=locked||!currentTask;$('#draftButton').disabled=locked||!currentTask;$('#resetKeypointsButton').disabled=locked||!currentTask;$('#usable').disabled=locked;$('#notes').disabled=locked;$('#reviewSection').style.display=locked?'block':'none';$('#poseControls').style.display=isPairedTask()?'flex':'none';$('#taskPoseHint').textContent=currentTask?.annotation_hint||'';$('#taskStatus').textContent=locked?`${currentTask.task_id} / ${entry.status}`:`${currentTask.task_id} / blind draft`;updatePairedPanelLayout();updatePoseControls();updateReviewText();applyZoom();}
-function updatePoseControls(){const paired=isPairedTask();$('#poseControls').style.display=paired?'flex':'none';if(!paired)return;const count=(pose)=>{const needed=required(pose);const placed=needed.filter(name=>posePoints(false,pose)[name]).length;return `${placed}/${needed.length}`;};$('#poseT1').textContent=`T1 Neutral (${count('t1')})`;$('#poseT2').textContent=`T2 Peak (${count('t2')})`;$('#poseT1').classList.toggle('active',activePose==='t1');$('#poseT2').classList.toggle('active',activePose==='t2');const definition=poseDefinition();$('#poseInfo').textContent=definition?`active ${activePose.toUpperCase()} · frame ${definition.frame_index} / ${Number(definition.timestamp_sec).toFixed(3)} s`:'';}
-function render(){if(!currentTask||!entry)return;const paired=isPairedTask();updatePairedPanelLayout();const needed=required();const current=points();const list=$('#pointList');list.innerHTML='';needed.forEach(name=>{const row=document.createElement('div');row.className='point-row '+(current[name]?'complete':'');row.innerHTML=`<span class="point-dot"></span><span>${esc(name)}</span><button ${submitted()?'disabled':''}>Select</button>`;row.querySelector('button').onclick=()=>{selectedPoint=name;render();};if(selectedPoint===name)row.style.outline='1px solid var(--gold)';list.appendChild(row);});const definition=poseDefinition();$('#frameInfo').textContent=paired?`Both poses shown · active ${activePose.toUpperCase()} · frame ${definition.frame_index} / ${Number(definition.timestamp_sec).toFixed(3)} s`:`Fixed RGB frame ${currentTask.frame_index} / ${Number(currentTask.timestamp_sec).toFixed(3)} s`;const quality=poseQuality(false);$('#usable').checked=Boolean(quality.usable);$('#notes').value=poseNotes();updatePoseControls();renderQuality();if(paired){renderManualSvg(svg,'t1',required('t1'),posePoints(false,'t1'));renderManualSvg(svgT2,'t2',required('t2'),posePoints(false,'t2'));qaSvg.innerHTML='';}else{renderManualSvg(svg,'frame',needed,current);renderQaSvg(needed);}updateReviewText();renderTaskList();}
-function renderManualSvg(targetSvg,pose,needed,current){targetSvg.innerHTML='';Object.entries(current).forEach(([name,point])=>{if(!needed.includes(name))return;const circle=document.createElementNS('http://www.w3.org/2000/svg','circle');circle.setAttribute('class','manual-point '+(pose===activePose&&name===selectedPoint?'active':''));circle.setAttribute('cx',point.x);circle.setAttribute('cy',point.y);circle.setAttribute('r',8);circle.dataset.name=name;if(!submitted())circle.addEventListener('pointerdown',startDrag);targetSvg.appendChild(circle);const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('class','manual-label');label.setAttribute('x',point.x+11);label.setAttribute('y',point.y-9);label.textContent=name;targetSvg.appendChild(label);});if(submitted()&&isPairedTask()){Object.entries(predictedPointsByPose[pose]||{}).forEach(([name,point])=>{if(!needed.includes(name))return;const circle=document.createElementNS('http://www.w3.org/2000/svg','circle');circle.setAttribute('class','pred-point');circle.setAttribute('cx',point.x);circle.setAttribute('cy',point.y);circle.setAttribute('r',9);targetSvg.appendChild(circle);const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('class','pred-label');label.setAttribute('x',point.x+10);label.setAttribute('y',point.y+4);label.textContent=`MMPose ${name}`;targetSvg.appendChild(label);});}
-}
-function renderQaSvg(needed){qaSvg.innerHTML='';if(!submitted())return;Object.entries(predictedPoints).forEach(([name,point])=>{if(!needed.includes(name))return;const circle=document.createElementNS('http://www.w3.org/2000/svg','circle');circle.setAttribute('class','pred-point');circle.setAttribute('cx',point.x);circle.setAttribute('cy',point.y);circle.setAttribute('r',9);qaSvg.appendChild(circle);const label=document.createElementNS('http://www.w3.org/2000/svg','text');label.setAttribute('class','pred-label');label.setAttribute('x',point.x+10);label.setAttribute('y',point.y+4);label.textContent=name;qaSvg.appendChild(label);});}
-function svgPoint(event,targetSvg=svg){const rect=targetSvg.getBoundingClientRect();const view=targetSvg.viewBox.baseVal;return{x:(event.clientX-rect.left)*view.width/rect.width,y:(event.clientY-rect.top)*view.height/rect.height};}
-function pointFromClient(clientX,clientY,targetSvg=svg){const rect=targetSvg.getBoundingClientRect();const view=targetSvg.viewBox.baseVal;if(!view.width||!view.height||clientX<rect.left||clientX>rect.right||clientY<rect.top||clientY>rect.bottom)return null;return{x:(clientX-rect.left)*view.width/rect.width,y:(clientY-rect.top)*view.height/rect.height};}
-function placePointAt(clientX,clientY,targetSvg=svg){if(!currentTask||submitted()||!([svg,svgT2].includes(targetSvg)))return;const pose=isPairedTask()?(targetSvg===svgT2?'t2':'t1'):'frame';if(isPairedTask())activatePose(pose,false);const point=pointFromClient(clientX,clientY,targetSvg);if(!point)return;const poseRequired=required(pose);const posePointsMap=points(pose);const name=selectedPoint;if(!name||!poseRequired.includes(name)){showStatus('failed','Select a keypoint before placing it');return;}posePointsMap[name]=point;markDirty();render();}
-function resetKeypoints(){if(!currentTask||submitted())return;if(!window.confirm('Reset all manually placed keypoints for this task?'))return;if(currentTask.frame_mode==='paired'){entry.blind_points_2d_by_pose={t1:{},t2:{}};}else{entry.blind_points_2d={};}selectedPoint=null;markDirty();render();showStatus('unsaved','All keypoint placements reset');}
-stageWrap.addEventListener('pointerdown',event=>{const target=event.target;if(!currentTask||!(target instanceof Element))return;const pointStage=target.closest('.stage');if(!pointStage)return;const manualPoint=target.closest('.manual-point');const isManualStage=pointStage===stage||pointStage===stageT2;if(isManualStage&&isPairedTask()&&!manualPoint){activatePose(pointStage===stageT2?'t2':'t1');}const isMiddlePan=event.button===1;const isLeftClick=event.button===0&&!manualPoint;if(isLeftClick)event.preventDefault();const isLeftPan=isLeftClick&&zoom>1;if(!isMiddlePan&&!isLeftPan)return;pan={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,startScrollLeft:stageWrap.scrollLeft,startScrollTop:stageWrap.scrollTop,moved:false};stageWrap.setPointerCapture(event.pointerId);},true);
-stageWrap.addEventListener('selectstart',event=>{if(event.target instanceof Element&&event.target.closest('.stage'))event.preventDefault();},true);
-stageWrap.addEventListener('pointermove',event=>{const target=event.target;if(target instanceof Element){const pointStage=target.closest('.stage');if(pointStage===stage||pointStage===stageT2)lastPointer={clientX:event.clientX,clientY:event.clientY,stage:pointStage,svg:pointStage===stageT2?svgT2:svg};else if(!pan)lastPointer=null;}if(!pan||event.pointerId!==pan.pointerId)return;const deltaX=event.clientX-pan.startX;const deltaY=event.clientY-pan.startY;if(!pan.moved&&Math.hypot(deltaX,deltaY)<4)return;pan.moved=true;event.preventDefault();stageWrap.classList.add('panning');stageWrap.scrollLeft=pan.startScrollLeft-deltaX;stageWrap.scrollTop=pan.startScrollTop-deltaY;});
-function finishPan(event){if(!pan||event.pointerId!==pan.pointerId)return;event.preventDefault();if(stageWrap.hasPointerCapture(event.pointerId))stageWrap.releasePointerCapture(event.pointerId);const moved=pan.moved;pan=null;stageWrap.classList.remove('panning');if(moved){panJustEnded=true;setTimeout(()=>{panJustEnded=false;},0);}}
-stageWrap.addEventListener('pointerup',finishPan);stageWrap.addEventListener('pointercancel',finishPan);stageWrap.addEventListener('click',event=>{if(!panJustEnded)return;event.preventDefault();event.stopPropagation();panJustEnded=false;},true);stageWrap.addEventListener('pointerleave',()=>{if(!pan)lastPointer=null;});
-window.addEventListener('keydown',event=>{if(event.code!=='Space'||event.repeat||['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName))return;spacePressed=true;stageWrap.classList.add('pan-ready');event.preventDefault();if(lastPointer&&lastPointer.stage?.contains(document.elementFromPoint(lastPointer.clientX,lastPointer.clientY)))placePointAt(lastPointer.clientX,lastPointer.clientY,lastPointer.svg);});
-window.addEventListener('keyup',event=>{if(event.code!=='Space')return;spacePressed=false;stageWrap.classList.remove('pan-ready');event.preventDefault();});window.addEventListener('blur',()=>{spacePressed=false;stageWrap.classList.remove('pan-ready');});
-function startDrag(event){event.preventDefault();const targetSvg=event.currentTarget.ownerSVGElement;if(!targetSvg||!([svg,svgT2].includes(targetSvg)))return;const pose=isPairedTask()?(targetSvg===svgT2?'t2':'t1'):'frame';if(isPairedTask()&&pose!==activePose){activePose=pose;updatePoseControls();updatePairedPanelLayout();}drag={name:event.currentTarget.dataset.name,svg:targetSvg,pose};targetSvg.setPointerCapture(event.pointerId);selectedPoint=drag.name;}
-function moveDrag(event){if(!drag||drag.svg!==event.currentTarget)return;const targetSvg=event.currentTarget;const view=targetSvg.viewBox.baseVal;const point=svgPoint(event,targetSvg);points(drag.pose)[drag.name]={x:Math.max(0,Math.min(view.width,point.x)),y:Math.max(0,Math.min(view.height,point.y))};markDirty();render();}
-function finishDrag(event){if(!drag||drag.svg!==event.currentTarget)return;if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);drag=null;}
-[svg,svgT2].forEach(targetSvg=>{targetSvg.addEventListener('pointermove',moveDrag);targetSvg.addEventListener('pointerup',finishDrag);targetSvg.addEventListener('pointercancel',finishDrag);});
-function renderQuality(result=null){const panel=$('#quality');const missing=required().filter(name=>!points()[name]);if(!currentTask){panel.className='quality';panel.innerHTML='<span class="muted">No task selected.</span>';return;}if(result?.error){panel.className='quality bad';panel.textContent=result.error;$('#manualAngle').textContent='-';return;}panel.className='quality '+(missing.length?'bad':'good');panel.innerHTML=`<span>${missing.length?'Complete the blind annotation':'All required points placed'}</span><span class="muted">Missing: ${esc(missing.join(', ')||'none')}</span>`;if(result?.manual_angle_deg!=null){$('#manualAngle').textContent=`${Number(result.manual_angle_deg).toFixed(1)} deg`;}else{$('#manualAngle').textContent='-';}}
-function schedulePreview(){clearTimeout(previewTimer);previewTimer=setTimeout(()=>previewManual().catch(error=>renderQuality({error:error.message})),150);}
-async function previewManual(){if(!currentTask||submitted())return null;const payload={...currentTask};if(currentTask.frame_mode==='paired'){payload.pose=activePose;payload.blind_points_2d_by_pose=entry.blind_points_2d_by_pose||{};}else{payload.blind_points_2d=points();}const result=await api('/api/task-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});renderQuality(result);return result;}
-function updateDraftMetadata(){if(!entry||submitted())return;const quality=poseQuality(true);quality.usable=$('#usable').checked;entry.notes_by_pose=entry.notes_by_pose||{};if(currentTask?.frame_mode==='paired')entry.notes_by_pose[activePose]=$('#notes').value;else entry.notes=$('#notes').value;markDirty();}
-function markDirty(){if(submitted())return;dirty=true;showStatus('unsaved','Unsaved draft');clearTimeout(saveTimer);saveTimer=setTimeout(saveDraft,900);}
-async function saveIfDirty(){if(dirty)await saveDraft();}
-async function saveDraft(){if(!currentTask||submitted())return;clearTimeout(saveTimer);try{const payload={...currentTask,action:'draft',quality:poseQuality(false),notes:poseNotes()};if(currentTask.frame_mode==='paired'){payload.pose=activePose;payload.blind_points_2d_by_pose=entry.blind_points_2d_by_pose||{};payload.quality_by_pose=entry.quality_by_pose||{};payload.notes_by_pose=entry.notes_by_pose||{};}else{payload.blind_points_2d=points();}const result=await api('/api/task-annotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});entry=result.entry;dirty=false;showStatus('',`Draft saved for ${currentTask.frame_mode==='paired'?activePose.toUpperCase():'frame'} ${poseFrame()}`,2200);render();}catch(error){showStatus('failed',`Draft save failed: ${error.message}`,0);}}
-async function finishAnnotation(){if(!currentTask||submitted())return;if(currentTask.frame_mode==='paired'){const missingByPose={};for(const pose of ['t1','t2']){const poseReq=currentTask?.poses?.[pose]?.required_points||currentTask?.required_points||[];const missing=poseReq.filter(name=>!entry.blind_points_2d_by_pose?.[pose]?.[name]);if(missing.length)missingByPose[pose]=missing;}if(Object.keys(missingByPose).length){showStatus('failed',Object.entries(missingByPose).map(([pose,missing])=>`${pose.toUpperCase()}: ${missing.join(', ')}`).join(' / '));return;}}else{const missing=required().filter(name=>!points()[name]);if(missing.length){showStatus('failed',`Place: ${missing.join(', ')}`);return;}}await saveIfDirty();try{const payload={...currentTask,action:'submit'};if(currentTask.frame_mode==='paired'){payload.blind_points_2d_by_pose=entry.blind_points_2d_by_pose||{};payload.quality_by_pose=entry.quality_by_pose||{};payload.notes_by_pose=entry.notes_by_pose||{};}else{payload.blind_points_2d=points();payload.quality=entry.quality||{};payload.notes=entry.notes||'';}const result=await api('/api/task-annotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});entry=result.entry;comparison=result.comparison;if(isPairedTask())predictedPointsByPose=comparison?.mmpose_points_by_pose||{};else predictedPoints=comparison?.mmpose_points||{};dirty=false;setReviewState();render();showStatus('',`Annotation finished. MMPose is now visible.`,5000);await loadReview();}catch(error){showStatus('failed',`Could not finish: ${error.message}`,0);}}
-async function loadReview(){if(!submitted())return;try{if(isPairedTask()){const results=await Promise.all(['t1','t2'].map(async pose=>{try{return [pose,await api(`/api/task-mmpose-frame?${taskQuery()}&pose=${encodeURIComponent(pose)}`)];}catch(error){return [pose,null];}}));predictedPointsByPose={};results.forEach(([pose,result])=>{if(result)predictedPointsByPose[pose]=result.points||{};});}else{const pose=await api(`/api/task-mmpose-frame?${taskQuery()}`);predictedPoints=pose.points||predictedPoints;}comparison=await api(`/api/task-comparison?${taskQuery()}`);render();}catch(error){showStatus('failed',error.message,0);}}
-function updateReviewText(){const box=$('#reviewPanel');const message=$('#reviewedMessage');if(!submitted()){box.classList.remove('show');message.textContent='';$('#comparison').innerHTML='';return;}box.classList.add('show');if(comparison?.frame_mode==='paired'){const value=(key)=>comparison[key]==null?'-':`${Number(comparison[key]).toFixed(1)} deg`;$('#comparison').innerHTML=`<span class="big">Manual ROM: ${value('manual_rom_deg')}</span><span class="big">MMPose ROM: ${value('mmpose_rom_deg')}</span><span class="difference">MMPose - annotated: ${value('signed_error_deg')}</span><span class="muted">Reference: neutral (T1) pose / ${esc(comparison.comparison_mode||'unknown')}</span>`;}else if(comparison){const manual=comparison.manual_angle_deg==null?'-':`${Number(comparison.manual_angle_deg).toFixed(1)} deg`;const mmpose=comparison.mmpose_angle_deg==null?'-':`${Number(comparison.mmpose_angle_deg).toFixed(1)} deg`;const difference=comparison.signed_error_deg==null?'-':`${Number(comparison.signed_error_deg).toFixed(1)} deg`;$('#comparison').innerHTML=`<span class="big">Annotated RGBD: ${manual}</span><span class="big">MMPose RGBD: ${mmpose}</span><span class="difference">MMPose - annotated: ${difference}</span><span class="muted">Mode: ${esc(comparison.comparison_mode||'unknown')}</span>`;}else{$('#comparison').innerHTML='<span class="muted">Loading MMPose comparison...</span>';}if(entry.status==='reviewed'){message.textContent=entry.mmpose_agree?'Marked agree with MMPose.':'Marked disagree with MMPose.';box.classList.remove('show');}}
-function showDisagreement(){$('#disagreementBox').style.display='block';}
-async function submitReview(decision){if(!currentTask||!submitted())return;try{const result=await api('/api/task-annotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...currentTask,action:'review',review_decision:decision,disagreement_reason:$('#disagreementReason').value})});entry=result.entry;setReviewState();render();await loadTasks();showStatus('',decision==='agree'?'Agreement saved':'Disagreement saved',4000);}catch(error){showStatus('failed',error.message,0);}}
-function requestDepthOverlay(overlay,url){overlay.style.display='none';overlay.onload=()=>{if(depthVisible)overlay.style.display='block';};overlay.onerror=()=>{overlay.style.display='none';};overlay.src=url;}
-function toggleDepth(){if(!currentTask)return;depthVisible=!depthVisible;[depth,depthT2,qaDepth].forEach(element=>element.style.display='none');if(depthVisible){const base=`/api/task-depth-overlay?${taskQuery()}&v=${requestNumber}`;if(isPairedTask()){requestDepthOverlay(depth,`${base}&pose=t1`);requestDepthOverlay(depthT2,`${base}&pose=t2`);}else{requestDepthOverlay(depth,base);requestDepthOverlay(qaDepth,base);}}$('#depthButton').textContent=depthVisible?'Hide depth':'Show depth';}
-function applyZoom(){$('#zoomValue').textContent=`${Math.round(zoom*100)}%`;if(!baseStageSize)return;const width=baseStageSize.width*zoom;const height=baseStageSize.height*zoom;[stage,stageT2,qaStage].forEach(element=>{element.classList.add('sized');element.style.width=`${width}px`;element.style.height=`${height}px`;});[manualPanel,pairedT2Panel,qaPanel].forEach(panel=>{panel.style.width=`${width}px`;panel.style.flex='0 0 auto';});stageWrap.classList.remove('zoomed','vertical-overflow');stageWrap.classList.toggle('zoomed',stageWrap.scrollWidth>stageWrap.clientWidth+1);stageWrap.classList.toggle('vertical-overflow',stageWrap.scrollHeight>stageWrap.clientHeight+1);}
-function zoomIn(){zoom=Math.min(MAX_ZOOM,zoom+ZOOM_STEP);applyZoom();}function zoomOut(){zoom=Math.max(MIN_ZOOM,zoom-ZOOM_STEP);applyZoom();}function resetZoom(){zoom=1;applyZoom();}
-stageWrap.addEventListener('wheel',event=>{const target=event.target;if(!currentTask||!(target instanceof Element))return;const zoomStage=target.closest('.stage');if(!zoomStage)return;event.preventDefault();const before=zoomStage.getBoundingClientRect();const relativeX=before.width?(event.clientX-before.left)/before.width:.5;const relativeY=before.height?(event.clientY-before.top)/before.height:.5;const nextZoom=Math.max(MIN_ZOOM,Math.min(MAX_ZOOM,zoom+(event.deltaY<0?ZOOM_STEP:-ZOOM_STEP)));if(nextZoom===zoom)return;zoom=nextZoom;applyZoom();const after=zoomStage.getBoundingClientRect();stageWrap.scrollLeft+=after.left+relativeX*after.width-event.clientX;stageWrap.scrollTop+=after.top+relativeY*after.height-event.clientY;},{passive:false});
-window.addEventListener('resize',()=>{zoom=1;baseStageSize=null;releaseStageLayout();if(rgb.complete&&rgb.naturalWidth)requestAnimationFrame(measureStageBase);applyZoom();});
-applyZoom();$('#login').classList.add('show');
-</script>
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <h1>ROM Measure 2 <span class="muted">· annotator</span></h1>
+      <span id="userLabel" class="user"></span>
+      <button id="logoutButton" class="small">Log out</button>
+    </header>
+    <div class="shell">
+      <aside>
+        <section class="section">
+          <h2>Your tasks</h2>
+          <p class="muted">Select a task prepared by the admin.</p>
+          <div id="taskList" class="task-list"><span class="muted">Loading…</span></div>
+        </section>
+      </aside>
+      <main>
+        <div id="emptyState" class="empty"><div><h2>No task selected</h2><p style="margin-top:6px">Choose a task from the list.</p></div></div>
+        <div id="workspace" class="hidden">
+          <div class="workspace-head">
+            <div><h2 id="taskTitle"></h2><p id="taskId" class="muted"></p></div>
+            <div id="taskMeta" class="meta"></div>
+          </div>
+            <div id="instructions" class="instructions"></div>
+          <div class="video-grid">
+            <article class="video-card">
+              <div id="leftAnnotationBanner" class="annotation-banner hidden">Annotate only this frame</div>
+              <div class="video-card-head"><strong>LEFT · SIDE VIEW</strong><span id="leftName"></span></div>
+              <div id="leftStage" class="stage"><img id="leftFrame" alt="Fixed side-view frame"><img id="leftDepthOverlay" class="depth-overlay hidden" alt="Depth color overlay"><svg id="leftOverlay" aria-label="Left frame annotation overlay"></svg></div>
+              <div id="leftFrameInfo" class="fixed-frame"></div>
+              <div id="leftDepthInfo" class="depth-info"></div>
+            </article>
+            <article class="video-card">
+              <div id="rightAnnotationBanner" class="annotation-banner hidden">Annotate only this frame</div>
+              <div class="video-card-head"><strong>RIGHT · FRONT VIEW</strong><span id="rightName"></span></div>
+              <div id="rightViewWarning" class="view-warning hidden" role="alert"></div>
+              <div class="stage right-stage"><img id="rightFrame" alt="Fixed front-view frame"><img id="rightDepthOverlay" class="depth-overlay hidden" alt="Depth color overlay"><svg id="rightOverlay" aria-label="Right frame annotation overlay"></svg></div>
+              <div id="rightFrameInfo" class="fixed-frame"></div>
+              <div id="rightDepthInfo" class="depth-info"></div>
+            </article>
+          </div>
+
+          <section class="annotation-panel">
+            <div class="annotation-head"><h2 id="annotationTitle">Annotate the target frame</h2><span id="annotationState" class="muted"></span></div>
+            <p id="annotationInstructions" class="muted">Select a point, then click its location on the target image. You can drag a placed point to adjust it.</p>
+            <div id="pointList" class="point-list"></div>
+            <div id="placementStatus" class="status-row"></div>
+            <div id="comparisonBox" class="comparison-box">
+              <h3 class="comparison-heading">Angles</h3>
+              <div class="comparison-values angle-values">
+                <div class="comparison-value"><strong id="brettComparisonValue">—</strong><span id="brettComparisonLabel">Annotated 3D angle</span></div>
+                <div class="comparison-value"><strong id="mmposeComparisonValue">—</strong><span>MMPose 3D angle · side view</span></div>
+                <div class="comparison-value"><strong id="frontMmposeComparisonValue">—</strong><span id="frontMmposeComparisonLabel">MMPose 3D angle · front view</span></div>
+              </div>
+              <h3 class="comparison-heading">Absolute differences from annotated angle</h3>
+              <div class="comparison-values difference-values">
+                <div class="comparison-value"><strong id="sideMmposeErrorValue">—</strong><span>annotated vs side-view MMPose</span></div>
+                <div class="comparison-value"><strong id="frontMmposeErrorValue">—</strong><span id="frontMmposeErrorLabel">annotated vs front-view MMPose</span></div>
+              </div>
+              <div id="comparisonStatus" class="comparison-status"></div>
+            </div>
+            <div id="depthReadout" class="depth-readout"></div>
+            <div class="field"><label for="annotationNotes">Notes (optional)</label><textarea id="annotationNotes" maxlength="2000" placeholder="Add a note about this annotation"></textarea></div>
+            <div class="actions"><button id="resetButton" class="small" type="button">Reset points</button><button id="draftButton" type="button">Save draft</button><button id="submitButton" class="primary" type="button">Submit annotation</button><span id="saveStatus" class="muted"></span></div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+  <div id="toast" class="hidden"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const overlays = { left: $('leftOverlay'), right: $('rightOverlay') };
+    const depthOverlays = { left: $('leftDepthOverlay'), right: $('rightDepthOverlay') };
+    const depthInfoFor = (side) => $(side + 'DepthInfo');
+    const state = { user: null, tasks: [], task: null, annotation: null, referenceMmpose: null, points: {}, selected: null, preview: null, drag: null, previewRequest: 0, depthRequest: { left: 0, right: 0 } };
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, options);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      return data;
+    }
+    function showToast(message, kind = 'good') { const toast = $('toast'); toast.textContent = message; toast.className = kind; clearTimeout(state.toastTimer); state.toastTimer = setTimeout(() => toast.className = 'hidden', 3500); }
+    function setLoginError(message) { $('loginError').textContent = message || ''; }
+    function submitted() { return state.annotation?.status === 'submitted'; }
+    function required() { return state.task?.required_points || []; }
+    function missingPoints() { return required().filter(name => !state.points[name]); }
+    function taskView() { return state.task?.view === 'front' ? 'front' : 'side'; }
+    function frontReferenceInvalidMessage() {
+      if (taskView() !== 'side') return '';
+      if (state.task?.template === 'hip_flexion') return 'Shoulder occluded by thigh — INVALID';
+      if (state.task?.template === 'knee_flexion') return 'Knee occluded by thigh — INVALID';
+      return '';
+    }
+    function frontReferenceIsInvalid() { return Boolean(frontReferenceInvalidMessage()); }
+    function targetSide() { return taskView() === 'front' ? 'right' : 'left'; }
+    function targetOverlay() { return overlays[targetSide()]; }
+    function viewLabel() { return taskView() === 'front' ? 'front view (right video)' : 'side view (left video)'; }
+    function userLabel() { const user = String(state.user || 'User'); return user.charAt(0).toUpperCase() + user.slice(1); }
+    function displayPoint(name) { return String(name).replaceAll('_', ' '); }
+    function absoluteDifference(first, second) {
+      const left = Number(first), right = Number(second);
+      return Number.isFinite(left) && Number.isFinite(right) ? Math.abs(left - right) : null;
+    }
+    function pointLabel(name) {
+      const index = required().indexOf(name);
+      const labels = state.task?.annotation_labels || [];
+      return labels[index] || displayPoint(name);
+    }
+    function pointOrderLabel() { return required().map(pointLabel).join(' → '); }
+    function referenceInstruction() { return taskView() === 'side' ? 'The other image shows the front view for reference only.' : 'The other image shows the side view for reference only.'; }
+    function taskInstruction() {
+      const custom = state.task?.annotation_instruction;
+      return custom ? `${custom} ${referenceInstruction()}` : `Place ${pointOrderLabel()} on the ${viewLabel()} image in order. The 3D angle is measured at ${pointLabel(state.task?.angle_vertex)}. ${referenceInstruction()}`;
+    }
+    function placementInstruction() {
+      const selection = `Select ${pointLabel(state.selected || missingPoints()[0] || required()[0] || '')}, then click its location on the ${targetSide()} image. You can drag a placed point to adjust it.`;
+      return state.task?.annotation_instruction ? `${state.task.annotation_instruction} ${selection} ${referenceInstruction()}` : `${selection} ${referenceInstruction()}`;
+    }
+    function savedPoints(annotation) {
+      return annotation?.points || annotation?.points_2d || annotation?.left_points || {};
+    }
+
+    async function signIn(event) {
+      event.preventDefault(); setLoginError('');
+      try {
+        const result = await api('/api/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ username: $('loginUser').value, password: $('loginPassword').value }) });
+        if (result.role === 'admin') { window.location.href = '/admin'; return; }
+        await start(result.user);
+      } catch (error) { setLoginError(error.message); }
+    }
+    async function start(user) { state.user = user; $('userLabel').textContent = user; $('loginLayer').classList.add('hidden'); $('app').classList.remove('hidden'); try { await loadTasks(); } catch (error) { showToast(error.message, 'bad'); } }
+    async function checkSession() {
+      try { const result = await api('/api/me'); if (result.authenticated && result.role === 'admin') { window.location.href = '/admin'; return; } if (result.authenticated && result.role === 'annotator') await start(result.user); } catch (error) { setLoginError(error.message); }
+    }
+    async function logout() { await api('/api/logout', { method: 'POST' }); window.location.href = '/'; }
+
+    async function loadTasks(preferredId = null) {
+      const result = await api('/api/tasks'); state.tasks = result.tasks || []; renderTaskList();
+      const next = preferredId || state.task?.task_id || state.tasks[0]?.task_id;
+      if (next) await selectTask(next); else { $('emptyState').classList.remove('hidden'); $('workspace').classList.add('hidden'); }
+    }
+    function renderTaskList() {
+      const list = $('taskList'); list.innerHTML = '';
+      if (!state.tasks.length) { list.innerHTML = '<span class="muted">No tasks have been assigned yet.</span>'; return; }
+      state.tasks.forEach(task => {
+        const button = document.createElement('button'); button.className = 'task-button' + (state.task?.task_id === task.task_id ? ' active' : '');
+        const title = document.createElement('strong'); title.textContent = task.name; button.appendChild(title);
+        const comparison = task.status === 'submitted' && task.mmpose_error_deg != null ? ` · Δ ${Number(task.mmpose_error_deg).toFixed(1)}°` : '';
+        const status = document.createElement('small'); status.textContent = task.status === 'submitted' ? `Submitted · ${Number(task.angle_deg).toFixed(1)}°${comparison}` : task.status === 'draft' ? 'Draft saved' : 'Not started'; status.className = task.status === 'submitted' ? 'submitted' : ''; button.appendChild(status);
+        button.addEventListener('click', () => selectTask(task.task_id)); list.appendChild(button);
+      });
+    }
+    async function selectTask(taskId) {
+      try {
+        state.previewRequest += 1; state.drag = null;
+        const result = await api('/api/tasks/' + encodeURIComponent(taskId));
+        state.task = result.task;
+        state.annotation = result.annotation;
+        state.referenceMmpose = result.reference_mmpose || null;
+        state.points = {...savedPoints(result.annotation)};
+        state.preview = result.annotation?.angle_deg != null ? {
+          angle_deg: result.annotation.angle_deg,
+          signed_angle_deg: result.annotation.signed_angle_deg,
+          angle_dimension: result.annotation.angle_dimension || result.task.angle_dimension || '2d',
+          angle_method: result.annotation.angle_method || result.task.angle_method,
+          calculation_note: result.annotation.calculation_note || result.task.calculation_note,
+          points_3d: result.annotation.points_3d || {},
+          mmpose: result.annotation.mmpose || {available: false, points: {}, missing_points: []},
+          valid: true, missing_points: [], missing_depth_points: [],
+        } : null;
+        state.selected = missingPoints()[0] || required()[0] || null;
+        $('emptyState').classList.add('hidden'); $('workspace').classList.remove('hidden');
+        renderTask(); loadTaskFrames(); renderTaskList(); requestPreview(true);
+      } catch (error) { showToast(error.message, 'bad'); }
+    }
+    function renderTask() {
+      const task = state.task; const pair = task.pair; const side = targetSide();
+      $('taskTitle').textContent = task.name; $('taskId').textContent = task.task_id;
+      $('leftName').textContent = pair.left.original_name; $('rightName').textContent = pair.right.original_name;
+      $('leftAnnotationBanner').classList.toggle('hidden', targetSide() !== 'left');
+      $('rightAnnotationBanner').classList.toggle('hidden', targetSide() !== 'right');
+      const frontWarning = frontReferenceInvalidMessage();
+      $('rightViewWarning').textContent = frontWarning;
+      $('rightViewWarning').classList.toggle('hidden', !frontWarning);
+      const referenceLabel = task.template === 'hip_abduction' ? 'side MMPose trunk reference; front MMPose pelvic reference' : 'neutral = 0°';
+      $('taskMeta').textContent = `${viewLabel()} · points ${pointOrderLabel()} · left frame ${task.left_frame_index} · right frame ${task.right_frame_index} · ${referenceLabel}`;
+      const defaultInstructions = taskInstruction();
+      $('instructions').textContent = task.notes ? `${task.notes} ${defaultInstructions}` : defaultInstructions;
+      $('annotationTitle').textContent = `Annotate the ${taskView()} frame`;
+      $('annotationInstructions').textContent = placementInstruction();
+      $('brettComparisonLabel').textContent = `${userLabel()} annotated 3D angle`;
+      $('annotationNotes').value = state.annotation?.notes || ''; $('annotationState').textContent = submitted() ? 'Submitted · editable' : state.annotation?.status === 'draft' ? 'Draft' : 'Not started';
+      $('draftButton').disabled = false; $('submitButton').disabled = false; $('resetButton').disabled = false; renderPointList(); renderOverlay(); renderAngle();
+    }
+    function frameUrl(task, side, frameIndex) {
+      return `/frame/${encodeURIComponent(task.pair_id)}/${side}/${encodeURIComponent(frameIndex)}.jpg?v=${encodeURIComponent(task.pair.created_at || '1')}`;
+    }
+    function depthUrl(task, side, frameIndex) {
+      return `/depth/${encodeURIComponent(task.pair_id)}/${side}/${encodeURIComponent(frameIndex)}.png?v=${encodeURIComponent('cw90-v3-black-invalid-' + (task.pair.created_at || '1'))}`;
+    }
+    function loadDepthFrame(task, side, frameIndex) {
+      const overlay = depthOverlays[side]; const requestId = ++state.depthRequest[side]; const pairId = task.pair_id;
+      overlay.classList.add('hidden'); depthInfoFor(side).textContent = 'Depth overlay: loading…';
+      overlay.onload = () => {
+        if (state.task?.task_id !== task.task_id || requestId !== state.depthRequest[side]) return;
+        overlay.classList.remove('hidden'); depthInfoFor(side).textContent = 'Depth overlay shown · blue near → red far · black = no depth';
+      };
+      overlay.onerror = () => {
+        if (state.task?.task_id !== task.task_id || requestId !== state.depthRequest[side]) return;
+        overlay.classList.add('hidden'); depthInfoFor(side).textContent = `Depth overlay unavailable for RGB frame ${frameIndex}`;
+      };
+      overlay.src = depthUrl(task, side, frameIndex);
+    }
+    function loadTaskFrames() {
+      const task = state.task; const pair = task.pair;
+      const taskId = task.task_id;
+      const loadFrame = (side, frameIndex) => {
+        const image = $(side + 'Frame'); const video = pair[side];
+        overlays[side].setAttribute('viewBox', `0 0 ${video.width} ${video.height}`);
+        image.onload = () => {
+          if (state.task?.task_id !== taskId) return;
+          overlays[side].setAttribute('viewBox', `0 0 ${image.naturalWidth || video.width} ${image.naturalHeight || video.height}`);
+          window.requestAnimationFrame(renderOverlay);
+        };
+        image.onerror = () => {
+          if (state.task?.task_id === taskId) showToast(`Could not load the fixed ${side} frame.`, 'bad');
+        };
+        image.src = frameUrl(task, side, frameIndex);
+      };
+      loadFrame('left', task.left_frame_index); loadFrame('right', task.right_frame_index);
+      loadDepthFrame(task, 'left', task.left_frame_index); loadDepthFrame(task, 'right', task.right_frame_index);
+      $('leftFrameInfo').textContent = `Exact source frame ${task.left_frame_index} · ${Number(task.left_timestamp_sec).toFixed(3)} s · ${pair.left.width}×${pair.left.height}${pair.left.depth ? ` · ${pair.left.depth.format}` : ''}`;
+      $('rightFrameInfo').textContent = `Exact source frame ${task.right_frame_index} · ${Number(task.right_timestamp_sec).toFixed(3)} s · ${pair.right.width}×${pair.right.height}${pair.right.depth ? ` · ${pair.right.depth.format}` : ''}`;
+    }
+    function renderPointList() {
+      const list = $('pointList'); list.innerHTML = '';
+      required().forEach(name => {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'point-button' + (state.points[name] ? ' done' : '') + (state.selected === name ? ' selected' : ''); button.disabled = false;
+        const dot = document.createElement('span'); dot.className = 'dot'; button.appendChild(dot);
+        const label = document.createElement('span'); label.textContent = state.points[name] ? `${pointLabel(name)} ✓` : pointLabel(name); button.appendChild(label);
+        button.addEventListener('click', () => { state.selected = name; renderPointList(); renderOverlay(); }); list.appendChild(button);
+      });
+      const missing = missingPoints();
+      if (state.task) $('annotationInstructions').textContent = placementInstruction();
+      $('placementStatus').textContent = submitted() ? missing.length ? `Previously submitted; place the remaining point${missing.length === 1 ? '' : 's'} and resubmit.` : 'Previously submitted; you can adjust the points and resubmit.' : missing.length ? `Select “${pointLabel(state.selected || missing[0])}”, then click that point on the ${targetSide()} image. ${required().length - missing.length}/${required().length} placed.` : 'All required points are placed. Adjust any point if needed, then submit.';
+      $('placementStatus').className = 'status-row ' + (missing.length ? '' : 'good');
+    }
+    function pointFromEvent(overlay, event) {
+      const rect = overlay.getBoundingClientRect(); const view = overlay.viewBox.baseVal;
+      if (!rect.width || !rect.height || !view.width || !view.height) return null;
+      return { x: Math.max(0, Math.min(view.width, (event.clientX - rect.left) * view.width / rect.width)), y: Math.max(0, Math.min(view.height, (event.clientY - rect.top) * view.height / rect.height)) };
+    }
+    function invalidDepthAt(side, point) {
+      const depthOverlay = depthOverlays[side]; const annotationOverlay = overlays[side];
+      const view = annotationOverlay?.viewBox?.baseVal;
+      if (!depthOverlay || depthOverlay.classList.contains('hidden') || !depthOverlay.complete || !depthOverlay.naturalWidth || !depthOverlay.naturalHeight || !view?.width || !view?.height) return null;
+      try {
+        const canvas = document.createElement('canvas'); canvas.width = depthOverlay.naturalWidth; canvas.height = depthOverlay.naturalHeight;
+        const context = canvas.getContext('2d', { willReadFrequently: true }); if (!context) return null;
+        context.drawImage(depthOverlay, 0, 0);
+        const x = Math.max(0, Math.min(canvas.width - 1, Math.floor(point.x * canvas.width / view.width)));
+        const y = Math.max(0, Math.min(canvas.height - 1, Math.floor(point.y * canvas.height / view.height)));
+        const pixel = context.getImageData(x, y, 1, 1).data;
+        // The server marks invalid depth with zero RGB (black).
+        return pixel[3] >= 160 && pixel[0] <= 8 && pixel[1] <= 8 && pixel[2] <= 8;
+      } catch (error) {
+        // If the browser cannot sample the overlay, keep the server-side
+        // point-cloud validation as the fallback.
+        return null;
+      }
+    }
+    function rejectInvalidDepth(side) {
+      const message = `Invalid depth at that location on the ${side === 'left' ? 'side' : 'front'} view. Choose another point outside the black/no-depth region.`;
+      $('placementStatus').textContent = message; $('placementStatus').className = 'status-row bad'; showToast(message, 'bad');
+    }
+    function drawTorsoPlane(overlay, modelPoints) {
+      const corners = [
+        modelPoints.left_shoulder,
+        modelPoints.right_shoulder,
+        modelPoints.right_hip,
+        modelPoints.left_hip,
+      ];
+      if (corners.some(point => !point)) return;
+      addSvg(overlay, 'polygon', {
+        points: corners.map(point => `${point.x},${point.y}`).join(' '),
+        class: 'torso-plane',
+      });
+    }
+    function renderModelPose(overlay, pose, order, labelPoints = false, showAngle = false, anglePrefix = 'M', showTorsoPlane = false) {
+      const modelPoints = pose?.points || {};
+      const modelOrder = pose?.angle_points?.length ? pose.angle_points : order;
+      const angleVertexName = pose?.angle_vertex || modelOrder[1] || order[1];
+      const modelFirst = modelPoints[modelOrder[0]], modelVertex = modelPoints[angleVertexName] || modelPoints[modelOrder[1]] || modelPoints[order[1]], modelSecond = modelPoints[modelOrder[2]];
+      const displayedPoints = new Set(pose?.relevant_points || required());
+      const frontPlaneMethod = pose?.angle_method === 'front_sagittal_shoulder' || pose?.angle_method === 'front_trunk' || pose?.angle_method === 'front_hip_abduction';
+      if (showTorsoPlane) drawTorsoPlane(overlay, modelPoints);
+      if (frontPlaneMethod) {
+        const leftShoulder = modelPoints.left_shoulder, rightShoulder = modelPoints.right_shoulder;
+        const leftHip = modelPoints.left_hip, rightHip = modelPoints.right_hip;
+        const shoulderMidpoint = leftShoulder && rightShoulder ? { x:(leftShoulder.x + rightShoulder.x) / 2, y:(leftShoulder.y + rightShoulder.y) / 2 } : null;
+        const hipMidpoint = leftHip && rightHip ? { x:(leftHip.x + rightHip.x) / 2, y:(leftHip.y + rightHip.y) / 2 } : null;
+        if (shoulderMidpoint && hipMidpoint) {
+          addSvg(overlay, 'line', { x1:shoulderMidpoint.x, y1:shoulderMidpoint.y, x2:hipMidpoint.x, y2:hipMidpoint.y, class:'model-line' });
+          addSvg(overlay, 'circle', { cx:shoulderMidpoint.x, cy:shoulderMidpoint.y, r:5, class:'model-point' });
+          addSvg(overlay, 'circle', { cx:hipMidpoint.x, cy:hipMidpoint.y, r:5, class:'model-point' });
+        }
+        const segmentSide = String(angleVertexName || '').split('_')[0];
+        const segmentEnd = pose?.angle_method === 'front_hip_abduction' ? 'knee' : 'elbow';
+        const segmentVertex = modelPoints[angleVertexName] || modelPoints[`${segmentSide}_shoulder`], segmentPoint = modelPoints[`${segmentSide}_${segmentEnd}`];
+        if (segmentVertex && segmentPoint) addSvg(overlay, 'line', { x1:segmentVertex.x, y1:segmentVertex.y, x2:segmentPoint.x, y2:segmentPoint.y, class:'model-line' });
+      } else {
+        if (modelOrder.length === 2) {
+          const modelEnd = modelPoints[modelOrder[1]];
+          if (modelFirst && modelEnd) addSvg(overlay, 'line', { x1:modelFirst.x, y1:modelFirst.y, x2:modelEnd.x, y2:modelEnd.y, class:'model-line' });
+        } else {
+          if (modelFirst && modelVertex) addSvg(overlay, 'line', { x1:modelFirst.x, y1:modelFirst.y, x2:modelVertex.x, y2:modelVertex.y, class:'model-line' });
+          if (modelVertex && modelSecond) addSvg(overlay, 'line', { x1:modelVertex.x, y1:modelVertex.y, x2:modelSecond.x, y2:modelSecond.y, class:'model-line' });
+        }
+        if (pose?.angle_method === 'ankle_sagittal') {
+          const heel = modelPoints.right_heel, bigToe = modelPoints.right_big_toe, smallToe = modelPoints.right_small_toe;
+          const toeMidpoint = bigToe && smallToe ? { x:(bigToe.x + smallToe.x) / 2, y:(bigToe.y + smallToe.y) / 2 } : null;
+          if (heel && toeMidpoint) addSvg(overlay, 'line', { x1:heel.x, y1:heel.y, x2:toeMidpoint.x, y2:toeMidpoint.y, class:'model-line' });
+        }
+      }
+      Object.entries(modelPoints).forEach(([name, point]) => {
+        if (!displayedPoints.has(name)) return;
+        addSvg(overlay, 'circle', { cx:point.x, cy:point.y, r:7, class:'model-point' });
+        if (labelPoints) { const label = addSvg(overlay, 'text', { x:point.x + 12, y:point.y - 10, class:'model-point-label' }); label.textContent = displayPoint(name); }
+      });
+      if (showAngle && pose?.angle_deg != null && modelVertex) { const label = addSvg(overlay, 'text', { x:modelVertex.x + 14, y:modelVertex.y - 18, class:'model-angle-label' }); label.textContent = `${anglePrefix} ${Number(pose.angle_deg).toFixed(1)}°`; }
+    }
+    function renderOverlay() {
+      Object.values(overlays).forEach(overlay => { overlay.innerHTML = ''; overlay.classList.add('inactive'); });
+      if (!state.task) return;
+      const overlay = targetOverlay(); overlay.classList.remove('inactive');
+      const referenceSide = overlay === overlays.left ? 'right' : 'left';
+      const order = state.task.angle_points || [];
+      const labelTargetModel = state.task.angle_method === 'front_abduction_manual' || state.task.angle_method === 'front_hip_abduction_manual' || state.task.angle_method === 'shoulder_axial_manual' || state.task.angle_method === 'hip_axial_manual';
+      renderModelPose(overlay, state.preview?.mmpose, order, labelTargetModel, true, 'M', overlay === overlays.right);
+      if (state.task.angle_method !== 'front_abduction_manual' && state.task.angle_method !== 'shoulder_axial_manual') {
+        renderModelPose(
+          overlays[referenceSide],
+          state.referenceMmpose,
+          order,
+          true,
+          state.referenceMmpose?.angle_deg != null && !frontReferenceIsInvalid(),
+          'M front',
+          overlays[referenceSide] === overlays.right,
+        );
+      }
+      const first = state.points[order[0]], vertex = state.points[order[1]], second = state.points[order[2]];
+      if (first && vertex) addSvg(overlay, 'line', { x1:first.x, y1:first.y, x2:vertex.x, y2:vertex.y, class:'angle-line' });
+      if (vertex && second) addSvg(overlay, 'line', { x1:vertex.x, y1:vertex.y, x2:second.x, y2:second.y, class:'angle-line' });
+      Object.entries(state.points).forEach(([name, point]) => {
+        if (!required().includes(name)) return;
+        const circle = addSvg(overlay, 'circle', { cx:point.x, cy:point.y, r:9, class:'manual-point' + (name === state.selected ? ' active' : ''), 'data-point':name });
+        circle.addEventListener('pointerdown', startDrag);
+        const label = addSvg(overlay, 'text', { x:point.x + 12, y:point.y - 10, class:'point-label' }); label.textContent = pointLabel(name);
+      });
+      if (state.preview?.angle_deg != null && vertex) { const label = addSvg(overlay, 'text', { x:vertex.x + 14, y:vertex.y + 28, class:'angle-label' }); label.textContent = `${Number(state.preview.angle_deg).toFixed(1)}°`; }
+    }
+    function addSvg(overlay, type, attributes) { const element = document.createElementNS('http://www.w3.org/2000/svg', type); Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value)); overlay.appendChild(element); return element; }
+    function startDrag(event) {
+      event.preventDefault(); const name = event.currentTarget.dataset.point; const overlay = event.currentTarget.ownerSVGElement;
+      state.drag = { name, side: overlay === overlays.right ? 'right' : 'left' }; state.selected = name; overlay.setPointerCapture?.(event.pointerId); renderPointList();
+    }
+    function moveDrag(event) {
+      if (!state.drag) return;
+      const point = pointFromEvent(overlays[state.drag.side], event); if (!point) return;
+      if (invalidDepthAt(state.drag.side, point) === true) { rejectInvalidDepth(state.drag.side); return; }
+      state.points[state.drag.name] = point; renderOverlay(); renderPointList();
+    }
+    function finishDrag(event) {
+      if (!state.drag) return;
+      const overlay = overlays[state.drag.side]; if (overlay.hasPointerCapture?.(event.pointerId)) overlay.releasePointerCapture(event.pointerId);
+      state.drag = null; requestPreview();
+    }
+    function bindOverlay(overlay, side) {
+      overlay.addEventListener('pointerdown', event => {
+        if (side !== targetSide() || event.target.closest?.('[data-point]')) return;
+        if (!state.selected) return;
+        const point = pointFromEvent(overlay, event); if (!point) return;
+        if (invalidDepthAt(side, point) === true) { rejectInvalidDepth(side); return; }
+        event.preventDefault(); state.points[state.selected] = point; state.selected = missingPoints()[0] || state.selected; renderPointList(); renderOverlay(); requestPreview();
+      });
+      overlay.addEventListener('pointermove', moveDrag); overlay.addEventListener('pointerup', finishDrag); overlay.addEventListener('pointercancel', finishDrag);
+    }
+    bindOverlay(overlays.left, 'left'); bindOverlay(overlays.right, 'right');
+    function renderAngle() {
+      const preview = state.preview || {}; const angle = preview.angle_deg; const dimension = preview.angle_dimension || state.task?.angle_dimension || '2d';
+      const p3 = preview.points_3d || {};
+      const missingDepth = preview.missing_depth_points || [];
+      const missingManual = missingPoints();
+      $('depthReadout').textContent = dimension !== '3d' ? '' : missingManual.length ? '3-D point-cloud angle; depth will be sampled after all points are placed.' : missingDepth.length ? `3-D point-cloud depth unavailable for: ${missingDepth.map(displayPoint).join(', ')}` : angle != null ? `3-D point cloud · ${state.task.angle_points.map(name => `${displayPoint(name)}: ${p3[name] ? '[' + p3[name].map(value => Number(value).toFixed(3)).join(', ') + '] m' : 'no depth'}`).join('    ')}` : '3-D point-cloud angle is waiting for valid depth at every point.';
+      const targetModel = preview.mmpose || {};
+      const referenceModel = state.referenceMmpose || {};
+      const targetIsFront = taskView() === 'front';
+      const compareReferenceView = state.task?.compare_reference_view !== false;
+      const sideModel = targetIsFront ? referenceModel : targetModel;
+      const frontModel = compareReferenceView ? (targetIsFront ? targetModel : referenceModel) : {};
+      const sideDifference = preview.side_mmpose_error_deg != null ? Number(preview.side_mmpose_error_deg) : absoluteDifference(angle, sideModel.angle_deg);
+      const frontInvalid = frontReferenceIsInvalid();
+      const frontDifference = frontInvalid ? null : preview.front_mmpose_error_deg != null ? Number(preview.front_mmpose_error_deg) : absoluteDifference(angle, frontModel.angle_deg);
+      $('frontMmposeComparisonValue').closest('.comparison-value')?.classList.toggle('hidden', !compareReferenceView);
+      $('frontMmposeErrorValue').closest('.comparison-value')?.classList.toggle('hidden', !compareReferenceView);
+      $('frontMmposeComparisonValue').closest('.comparison-value')?.classList.toggle('invalid', frontInvalid && compareReferenceView);
+      $('frontMmposeErrorValue').closest('.comparison-value')?.classList.toggle('invalid', frontInvalid && compareReferenceView);
+      $('brettComparisonValue').textContent = angle == null ? '—' : `${Number(angle).toFixed(1)}°`;
+      $('mmposeComparisonValue').textContent = sideModel.angle_deg == null ? '—' : `${Number(sideModel.angle_deg).toFixed(1)}°`;
+      $('frontMmposeComparisonValue').textContent = frontInvalid ? 'INVALID' : frontModel.angle_deg == null ? '—' : `${Number(frontModel.angle_deg).toFixed(1)}°`;
+      $('sideMmposeErrorValue').textContent = sideDifference == null ? '—' : `${sideDifference.toFixed(1)}°`;
+      $('frontMmposeErrorValue').textContent = frontInvalid ? '—' : frontDifference == null ? '—' : `${frontDifference.toFixed(1)}°`;
+      $('frontMmposeComparisonLabel').textContent = frontInvalid ? 'MMPose 3D angle · front view (invalid)' : 'MMPose 3D angle · front view';
+      $('frontMmposeErrorLabel').textContent = frontInvalid ? 'not calculated · front view invalid' : 'annotated vs front-view MMPose';
+      const comparisonMessages = [];
+      if (!(targetIsFront && state.task.angle_method === 'front_abduction_manual') && sideModel.angle_deg == null && (sideModel.angle_method || sideModel.reason)) comparisonMessages.push(`Side-view MMPose: ${sideModel.reason || sideModel.calculation_note || 'angle unavailable'}`);
+      if (frontInvalid && compareReferenceView) comparisonMessages.push(`Front-view MMPose: ${frontReferenceInvalidMessage().toLowerCase()}.`);
+      else if (compareReferenceView && frontModel.angle_deg == null && (frontModel.angle_method || frontModel.reason)) comparisonMessages.push(`Front-view MMPose: ${frontModel.reason || frontModel.calculation_note || 'angle unavailable'}`);
+      $('comparisonStatus').textContent = comparisonMessages.join(' · ');
+      if (dimension === '3d' && !missingPoints().length && missingDepth.length) {
+        $('placementStatus').textContent = `No valid depth for: ${missingDepth.map(displayPoint).join(', ')}. Do not place points on black/no-depth areas.`;
+        $('placementStatus').className = 'status-row bad';
+      }
+    }
+    async function requestPreview(includeSubmitted = false) {
+      if (!state.task) return; const requestId = ++state.previewRequest;
+      try {
+        const result = await api('/api/tasks/' + encodeURIComponent(state.task.task_id) + '/preview', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ points:state.points }) });
+        if (requestId !== state.previewRequest) return; state.preview = result; state.referenceMmpose = result.reference_mmpose || state.referenceMmpose; renderAngle(); renderOverlay();
+        const invalidManualPoints = (result.missing_depth_points || []).filter(name => required().includes(name) && state.points[name]);
+        if (invalidManualPoints.length) {
+          const message = `Invalid depth for ${invalidManualPoints.map(pointLabel).join(', ')}. Choose another location outside the black/no-depth region.`;
+          $('placementStatus').textContent = message; $('placementStatus').className = 'status-row bad'; showToast(message, 'bad');
+        }
+      } catch (error) { if (requestId === state.previewRequest) { $('placementStatus').textContent = error.message; $('placementStatus').className = 'status-row bad'; } }
+    }
+    function resetPoints() { if (!state.task) return; if (!window.confirm(`Reset all points on the ${targetSide()} image?`)) return; state.points = {}; state.preview = null; state.selected = required()[0] || null; renderTask(); }
+    async function saveAnnotation(action) {
+      if (!state.task) return;
+      if (action === 'submit' && missingPoints().length) { $('placementStatus').textContent = 'Place: ' + missingPoints().map(displayPoint).join(', '); $('placementStatus').className = 'status-row bad'; return; }
+      const button = action === 'submit' ? $('submitButton') : $('draftButton'); button.disabled = true;
+      try {
+        const result = await api('/api/tasks/' + encodeURIComponent(state.task.task_id) + '/annotation', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ action, points:state.points, notes:$('annotationNotes').value }) });
+        state.annotation = result.annotation; state.points = {...savedPoints(result.annotation)}; state.preview = result; state.referenceMmpose = result.reference_mmpose || state.referenceMmpose; renderTask(); await loadTasks(state.task.task_id);
+        const comparisonParts = [];
+        if (result.side_mmpose_error_deg != null) comparisonParts.push(`side Δ ${Number(result.side_mmpose_error_deg).toFixed(1)}°`);
+        if (result.front_mmpose_error_deg != null) comparisonParts.push(`front Δ ${Number(result.front_mmpose_error_deg).toFixed(1)}°`);
+        const comparison = comparisonParts.length ? ` · ${comparisonParts.join(' · ')}` : '';
+        showToast(action === 'submit' ? `Annotation submitted · ${Number(result.angle_deg).toFixed(1)}°${comparison}` : 'Draft saved.');
+      } catch (error) { showToast(error.message, 'bad'); }
+      finally { button.disabled = false; }
+    }
+    $('loginForm').addEventListener('submit', signIn); $('logoutButton').addEventListener('click', logout); $('resetButton').addEventListener('click', resetPoints); $('draftButton').addEventListener('click', () => saveAnnotation('draft')); $('submitButton').addEventListener('click', () => saveAnnotation('submit')); checkSession();
+  </script>
 </body>
 </html>
