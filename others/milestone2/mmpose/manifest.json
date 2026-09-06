@@ -1,0 +1,566 @@
+{
+  "depth_overlay": true,
+  "exported": 22,
+  "items": [
+    {
+      "front_error_deg": 2.157844379841052,
+      "front_mmpose_angle_deg": 79.73985335980359,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": null,
+        "width": 1200
+      },
+      "manual_angle_deg": 81.89769773964464,
+      "name": "Right shoulder internal rotation",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788515459_1a1426f792__task_0816a24577fa4c0eba474a8d5d6f4d04__Right_shoulder_internal_rotation.png",
+      "pair_id": "pair_1788515459_1a1426f792",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 79.73985335980359,
+        "width": 1200
+      },
+      "side_error_deg": null,
+      "side_mmpose_angle_deg": null,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_0816a24577fa4c0eba474a8d5d6f4d04.json",
+      "status": "exported",
+      "task_id": "task_0816a24577fa4c0eba474a8d5d6f4d04"
+    },
+    {
+      "front_error_deg": 11.69918172475667,
+      "front_mmpose_angle_deg": 115.26065371986796,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 125.89640636075795,
+        "width": 1200
+      },
+      "manual_angle_deg": 126.95983544462463,
+      "name": "Right shoulder flexion",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788515459_1a1426f792__task_0ce1810c1ed449c0b32dae3468288581__Right_shoulder_flexion.png",
+      "pair_id": "pair_1788515459_1a1426f792",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 115.26065371986796,
+        "width": 1200
+      },
+      "side_error_deg": 1.06342908386668,
+      "side_mmpose_angle_deg": 125.89640636075795,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_0ce1810c1ed449c0b32dae3468288581.json",
+      "status": "exported",
+      "task_id": "task_0ce1810c1ed449c0b32dae3468288581"
+    },
+    {
+      "front_error_deg": 54.67109467315582,
+      "front_mmpose_angle_deg": 162.95095461618297,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 108.20881590757801,
+        "width": 1200
+      },
+      "manual_angle_deg": 108.27985994302715,
+      "name": "Right elbow flexion",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788544108_e0b6139ba0__task_0f34d54374f64ca0a4ca229fb878665c__Right_elbow_flexion.png",
+      "pair_id": "pair_1788544108_e0b6139ba0",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 162.95095461618297,
+        "width": 1200
+      },
+      "side_error_deg": 0.07104403544913396,
+      "side_mmpose_angle_deg": 108.20881590757801,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_0f34d54374f64ca0a4ca229fb878665c.json",
+      "status": "exported",
+      "task_id": "task_0f34d54374f64ca0a4ca229fb878665c"
+    },
+    {
+      "front_error_deg": 67.13392900487678,
+      "front_mmpose_angle_deg": 75.02786964411608,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 8.1905807800417,
+        "width": 1200
+      },
+      "manual_angle_deg": 7.893940639239304,
+      "name": "Right knee extension",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788581943_c77f5c035b__task_13bed2e4b05142a1acd15e8a5eb8e29f__Right_knee_extension.png",
+      "pair_id": "pair_1788581943_c77f5c035b",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 75.02786964411608,
+        "width": 1200
+      },
+      "side_error_deg": 0.29664014080239554,
+      "side_mmpose_angle_deg": 8.1905807800417,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_13bed2e4b05142a1acd15e8a5eb8e29f.json",
+      "status": "exported",
+      "task_id": "task_13bed2e4b05142a1acd15e8a5eb8e29f"
+    },
+    {
+      "front_error_deg": 1.7017286279266273,
+      "front_mmpose_angle_deg": 165.83203307517957,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": null,
+        "width": 1200
+      },
+      "manual_angle_deg": 164.13030444725294,
+      "name": "Right shoulder abduction",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788544108_e0b6139ba0__task_18a43bdfeb7b46caa4eaa51de17bca48__Right_shoulder_abduction.png",
+      "pair_id": "pair_1788544108_e0b6139ba0",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 165.83203307517957,
+        "width": 1200
+      },
+      "side_error_deg": null,
+      "side_mmpose_angle_deg": null,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_18a43bdfeb7b46caa4eaa51de17bca48.json",
+      "status": "exported",
+      "task_id": "task_18a43bdfeb7b46caa4eaa51de17bca48"
+    },
+    {
+      "front_error_deg": 23.012922518913086,
+      "front_mmpose_angle_deg": 150.9128051307537,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 124.95158932487911,
+        "width": 1200
+      },
+      "manual_angle_deg": 127.89988261184061,
+      "name": "Right knee flexion",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788547311_fdc64346e1__task_1dd1f4ab8aa441faa295b325ab10366b__Right_knee_flexion.png",
+      "pair_id": "pair_1788547311_fdc64346e1",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 150.9128051307537,
+        "width": 1200
+      },
+      "side_error_deg": 2.9482932869615013,
+      "side_mmpose_angle_deg": 124.95158932487911,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_1dd1f4ab8aa441faa295b325ab10366b.json",
+      "status": "exported",
+      "task_id": "task_1dd1f4ab8aa441faa295b325ab10366b"
+    },
+    {
+      "front_error_deg": null,
+      "front_mmpose_angle_deg": null,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 68.56262367032329,
+        "width": 1200
+      },
+      "manual_angle_deg": 69.32393139447137,
+      "name": "Right ankle plantarflexion",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788584088_0bf0f7cf19__task_2c3aa8b7e1824fb1975bf2e68be41c9f__Right_ankle_plantarflexion.png",
+      "pair_id": "pair_1788584088_0bf0f7cf19",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": null,
+        "width": 1200
+      },
+      "side_error_deg": 0.7613077241480823,
+      "side_mmpose_angle_deg": 68.56262367032329,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_2c3aa8b7e1824fb1975bf2e68be41c9f.json",
+      "status": "exported",
+      "task_id": "task_2c3aa8b7e1824fb1975bf2e68be41c9f"
+    },
+    {
+      "front_error_deg": 3.5337983115789946,
+      "front_mmpose_angle_deg": 26.068027593452843,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 22.97596103280904,
+        "width": 1200
+      },
+      "manual_angle_deg": 22.53422928187385,
+      "name": "Right hip abduction",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788581695_b8854686c5__task_47b3a92724c24625be80998678666bdb__Right_hip_abduction.png",
+      "pair_id": "pair_1788581695_b8854686c5",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 26.068027593452843,
+        "width": 1200
+      },
+      "side_error_deg": 0.44173175093519035,
+      "side_mmpose_angle_deg": 22.97596103280904,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_47b3a92724c24625be80998678666bdb.json",
+      "status": "exported",
+      "task_id": "task_47b3a92724c24625be80998678666bdb"
+    },
+    {
+      "front_error_deg": 2.2872916619433568,
+      "front_mmpose_angle_deg": 70.7152559724107,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": null,
+        "width": 1200
+      },
+      "manual_angle_deg": 73.00254763435406,
+      "name": "Right shoulder external rotation",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788515459_1a1426f792__task_486d0f58fcf947079c993d1f1c57b064__Right_shoulder_external_rotation.png",
+      "pair_id": "pair_1788515459_1a1426f792",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 70.7152559724107,
+        "width": 1200
+      },
+      "side_error_deg": null,
+      "side_mmpose_angle_deg": null,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_486d0f58fcf947079c993d1f1c57b064.json",
+      "status": "exported",
+      "task_id": "task_486d0f58fcf947079c993d1f1c57b064"
+    },
+    {
+      "front_error_deg": 39.02236584571557,
+      "front_mmpose_angle_deg": 157.07866780508138,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 117.16297842770781,
+        "width": 1200
+      },
+      "manual_angle_deg": 118.05630195936581,
+      "name": "Right hip flexion",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788547311_fdc64346e1__task_487774aef66e4ad8ac30cdb3616c927e__Right_hip_flexion.png",
+      "pair_id": "pair_1788547311_fdc64346e1",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 157.07866780508138,
+        "width": 1200
+      },
+      "side_error_deg": 0.8933235316579982,
+      "side_mmpose_angle_deg": 117.16297842770781,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_487774aef66e4ad8ac30cdb3616c927e.json",
+      "status": "exported",
+      "task_id": "task_487774aef66e4ad8ac30cdb3616c927e"
+    },
+    {
+      "front_error_deg": 0.8783986564982342,
+      "front_mmpose_angle_deg": 125.12407328342445,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": null,
+        "width": 1200
+      },
+      "manual_angle_deg": 126.00247193992269,
+      "name": "Right shoulder external rotation",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788544108_e0b6139ba0__task_5114c37b05e946d785b4dd478406295a__Right_shoulder_external_rotation.png",
+      "pair_id": "pair_1788544108_e0b6139ba0",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 125.12407328342445,
+        "width": 1200
+      },
+      "side_error_deg": null,
+      "side_mmpose_angle_deg": null,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_5114c37b05e946d785b4dd478406295a.json",
+      "status": "exported",
+      "task_id": "task_5114c37b05e946d785b4dd478406295a"
+    },
+    {
+      "front_error_deg": 12.587675026138307,
+      "front_mmpose_angle_deg": 37.66678522042008,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 48.747187025947284,
+        "width": 1200
+      },
+      "manual_angle_deg": 50.25446024655839,
+      "name": "Right shoulder extension",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788544108_e0b6139ba0__task_82d25d48bb4342a2a16778924c030aaf__Right_shoulder_extension.png",
+      "pair_id": "pair_1788544108_e0b6139ba0",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 37.66678522042008,
+        "width": 1200
+      },
+      "side_error_deg": 1.5072732206111041,
+      "side_mmpose_angle_deg": 48.747187025947284,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_82d25d48bb4342a2a16778924c030aaf.json",
+      "status": "exported",
+      "task_id": "task_82d25d48bb4342a2a16778924c030aaf"
+    },
+    {
+      "front_error_deg": 4.099441763558179,
+      "front_mmpose_angle_deg": 25.491850026684563,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 29.640510415091157,
+        "width": 1200
+      },
+      "manual_angle_deg": 29.591291790242742,
+      "name": "Right shoulder extension",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788515459_1a1426f792__task_90532e0d6074437398fb6ec6deb5cca6__Right_shoulder_extension.png",
+      "pair_id": "pair_1788515459_1a1426f792",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 25.491850026684563,
+        "width": 1200
+      },
+      "side_error_deg": 0.04921862484841455,
+      "side_mmpose_angle_deg": 29.640510415091157,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_90532e0d6074437398fb6ec6deb5cca6.json",
+      "status": "exported",
+      "task_id": "task_90532e0d6074437398fb6ec6deb5cca6"
+    },
+    {
+      "front_error_deg": 10.913879829904346,
+      "front_mmpose_angle_deg": 147.8939576539178,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 136.59316098437188,
+        "width": 1200
+      },
+      "manual_angle_deg": 136.98007782401345,
+      "name": "Right knee flexion",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788581695_b8854686c5__task_934e30998b0b49efa58545589f0f059e__Right_knee_flexion.png",
+      "pair_id": "pair_1788581695_b8854686c5",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 147.8939576539178,
+        "width": 1200
+      },
+      "side_error_deg": 0.38691683964157164,
+      "side_mmpose_angle_deg": 136.59316098437188,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_934e30998b0b49efa58545589f0f059e.json",
+      "status": "exported",
+      "task_id": "task_934e30998b0b49efa58545589f0f059e"
+    },
+    {
+      "front_error_deg": 46.653538927483524,
+      "front_mmpose_angle_deg": 162.55859857749795,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 116.59066527758611,
+        "width": 1200
+      },
+      "manual_angle_deg": 115.90505965001442,
+      "name": "Right elbow flexion",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788515459_1a1426f792__task_9d2259eb045b4bf689a1a1221139c85a__Right_elbow_flexion.png",
+      "pair_id": "pair_1788515459_1a1426f792",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 162.55859857749795,
+        "width": 1200
+      },
+      "side_error_deg": 0.6856056275716895,
+      "side_mmpose_angle_deg": 116.59066527758611,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_9d2259eb045b4bf689a1a1221139c85a.json",
+      "status": "exported",
+      "task_id": "task_9d2259eb045b4bf689a1a1221139c85a"
+    },
+    {
+      "front_error_deg": 3.37920024971433,
+      "front_mmpose_angle_deg": 161.39714352254362,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": null,
+        "width": 1200
+      },
+      "manual_angle_deg": 164.77634377225795,
+      "name": "Right shoulder abduction",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788515459_1a1426f792__task_a482c6b3a4bf409cb5a47b0898997827__Right_shoulder_abduction.png",
+      "pair_id": "pair_1788515459_1a1426f792",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 161.39714352254362,
+        "width": 1200
+      },
+      "side_error_deg": null,
+      "side_mmpose_angle_deg": null,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_a482c6b3a4bf409cb5a47b0898997827.json",
+      "status": "exported",
+      "task_id": "task_a482c6b3a4bf409cb5a47b0898997827"
+    },
+    {
+      "front_error_deg": 25.171624468536592,
+      "front_mmpose_angle_deg": 55.45832171992244,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 32.36264575260407,
+        "width": 1200
+      },
+      "manual_angle_deg": 30.286697251385846,
+      "name": "Right hip abduction",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788547311_fdc64346e1__task_a805118ae3114397adcb1c0df30ab3d5__Right_hip_abduction.png",
+      "pair_id": "pair_1788547311_fdc64346e1",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 55.45832171992244,
+        "width": 1200
+      },
+      "side_error_deg": 2.075948501218221,
+      "side_mmpose_angle_deg": 32.36264575260407,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_a805118ae3114397adcb1c0df30ab3d5.json",
+      "status": "exported",
+      "task_id": "task_a805118ae3114397adcb1c0df30ab3d5"
+    },
+    {
+      "front_error_deg": 46.46900872490768,
+      "front_mmpose_angle_deg": 167.3412171272545,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 119.72610204364946,
+        "width": 1200
+      },
+      "manual_angle_deg": 120.87220840234683,
+      "name": "Right hip flexion",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788581695_b8854686c5__task_a8711a44cfea484b9924bd5ce80d7257__Right_hip_flexion.png",
+      "pair_id": "pair_1788581695_b8854686c5",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 167.3412171272545,
+        "width": 1200
+      },
+      "side_error_deg": 1.1461063586973665,
+      "side_mmpose_angle_deg": 119.72610204364946,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_a8711a44cfea484b9924bd5ce80d7257.json",
+      "status": "exported",
+      "task_id": "task_a8711a44cfea484b9924bd5ce80d7257"
+    },
+    {
+      "front_error_deg": null,
+      "front_mmpose_angle_deg": null,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 41.83739099916369,
+        "width": 1200
+      },
+      "manual_angle_deg": 46.16455408651913,
+      "name": "Right ankle plantarflexion",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788581943_c77f5c035b__task_abe2d846df2642eaa13576782751e009__Right_ankle_plantarflexion.png",
+      "pair_id": "pair_1788581943_c77f5c035b",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": null,
+        "width": 1200
+      },
+      "side_error_deg": 4.327163087355444,
+      "side_mmpose_angle_deg": 41.83739099916369,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_abe2d846df2642eaa13576782751e009.json",
+      "status": "exported",
+      "task_id": "task_abe2d846df2642eaa13576782751e009"
+    },
+    {
+      "front_error_deg": 29.264508781026365,
+      "front_mmpose_angle_deg": 111.52762132393167,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 136.52737364576404,
+        "width": 1200
+      },
+      "manual_angle_deg": 140.79213010495803,
+      "name": "Right shoulder flexion",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788544108_e0b6139ba0__task_b2ceafaaf83645ccbe2df49f09866cf3__Right_shoulder_flexion.png",
+      "pair_id": "pair_1788544108_e0b6139ba0",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 111.52762132393167,
+        "width": 1200
+      },
+      "side_error_deg": 4.26475645919399,
+      "side_mmpose_angle_deg": 136.52737364576404,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_b2ceafaaf83645ccbe2df49f09866cf3.json",
+      "status": "exported",
+      "task_id": "task_b2ceafaaf83645ccbe2df49f09866cf3"
+    },
+    {
+      "reason": "task is no longer present in tasks.json",
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_c8b858f67e584f3d9e1efd0917084993.json",
+      "status": "skipped",
+      "task_id": "task_c8b858f67e584f3d9e1efd0917084993"
+    },
+    {
+      "front_error_deg": 0.6998561021752039,
+      "front_mmpose_angle_deg": 65.95868698722698,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": null,
+        "width": 1200
+      },
+      "manual_angle_deg": 66.65854308940219,
+      "name": "Right shoulder internal rotation",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788544108_e0b6139ba0__task_d3e4ede121204a70a20557321ca8cf27__Right_shoulder_internal_rotation.png",
+      "pair_id": "pair_1788544108_e0b6139ba0",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 65.95868698722698,
+        "width": 1200
+      },
+      "side_error_deg": null,
+      "side_mmpose_angle_deg": null,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_d3e4ede121204a70a20557321ca8cf27.json",
+      "status": "exported",
+      "task_id": "task_d3e4ede121204a70a20557321ca8cf27"
+    },
+    {
+      "front_error_deg": 80.96380941946708,
+      "front_mmpose_angle_deg": 81.58207200980743,
+      "left_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 4.225556164031161,
+        "width": 1200
+      },
+      "manual_angle_deg": 0.6182625903403505,
+      "name": "Right knee extension",
+      "output": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/exports/haziq/pair_1788584088_0bf0f7cf19__task_e91217f4acc64c32990de53fa833f037__Right_knee_extension.png",
+      "pair_id": "pair_1788584088_0bf0f7cf19",
+      "right_panel": {
+        "depth_overlay": "shown",
+        "height": 1600,
+        "mmpose_angle_deg": 81.58207200980743,
+        "width": 1200
+      },
+      "side_error_deg": 3.6072935736908107,
+      "side_mmpose_angle_deg": 4.225556164031161,
+      "source_annotation": "/home/haziq/datasets/telept/data/milestone2/rom_measure2/annotations/haziq/task_e91217f4acc64c32990de53fa833f037.json",
+      "status": "exported",
+      "task_id": "task_e91217f4acc64c32990de53fa833f037"
+    }
+  ],
+  "panel_width": 1200,
+  "skipped": 1,
+  "storage_dir": "/home/haziq/datasets/telept/data/milestone2/rom_measure2",
+  "username": "haziq"
+}
