@@ -8,7 +8,7 @@ calculations and annotation style as the SAM-3D NPZ visualizers.
 Examples:
 
     /home/haziq/anaconda3/envs/mhr_new/bin/python \
-        /data/haziq/telept/my_scripts/data_visualization/rom_functions/visualize_mhr_json_rom.py \
+        /data/haziq/telept/my_scripts/data_visualization/rom_visualization_scripts/visualize_mhr_json_rom.py \
         --json /path/to/s01_cam0_brett_adhesive_capsulitis.json \
         --joint shoulder --movement flexion --time 10.076 --side right
 
@@ -40,7 +40,7 @@ for import_path in (DATA_VISUALIZATION_DIR, SCRIPT_DIR):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
 
-from rom_functions.mhr_hip import (  # noqa: E402
+from rom_visualization_scripts.mhr_hip import (  # noqa: E402
     compute_hip_abduction,
     compute_hip_extension,
     compute_hip_flexion,
@@ -48,20 +48,20 @@ from rom_functions.mhr_hip import (  # noqa: E402
     mhr_upleg_twist_deg,
     select_hip_side,
 )
-from rom_functions.mhr_json import (  # noqa: E402
+from rom_visualization_scripts.mhr_json import (  # noqa: E402
     load_mhr_json,
     load_mhr_model,
     reconstruct_mhr_json_frame,
     select_mhr_json_frame,
 )
-from rom_functions.mhr_shoulder import (  # noqa: E402
+from rom_visualization_scripts.mhr_shoulder import (  # noqa: E402
     compute_shoulder_abduction,
     compute_shoulder_flexion,
     compute_shoulder_rotation,
     mhr_uparm_twist_deg,
     select_shoulder_side,
 )
-from rom_functions.mhr_shoulder import build_mhr_body_frame  # noqa: E402
+from rom_visualization_scripts.mhr_shoulder import build_mhr_body_frame  # noqa: E402
 from visualize_mhr_hip import _draw_hip_measurement  # noqa: E402
 from visualize_mhr_hip_rotation import _draw_hip_rotation_measurement  # noqa: E402
 from visualize_mhr_shoulder_flexion import (  # noqa: E402

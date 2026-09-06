@@ -14,7 +14,7 @@ outward direction is positive external rotation.
 For the rendered SAM-3D-Body video timeline, run:
 
     /home/haziq/anaconda3/envs/mhr_new/bin/python \
-        /data/haziq/telept/my_scripts/data_visualization/rom_functions/visualize_mhr_hip_rotation.py \
+        /data/haziq/telept/my_scripts/data_visualization/rom_visualization_scripts/visualize_mhr_hip_rotation.py \
         /data/haziq/mocap/data/brett/train/s01/sam3d/cam0/hip_osteoarthritis_mhr_outputs.npz \
         --time 12.611 --movement internal_rotation --side right
 
@@ -69,14 +69,14 @@ from visualize_mhr_shoulder_flexion import (  # noqa: E402
     _render_mesh,
     _resolve_frame,
 )
-from rom_functions.mhr_hip import (  # noqa: E402
+from rom_visualization_scripts.mhr_hip import (  # noqa: E402
     MHR_BODY_EDGES,
     MHR_HIP_JOINTS,
     HipRotationResult,
     compute_hip_rotation,
     mhr_upleg_twist_deg,
 )
-from rom_functions.mhr_shoulder import build_mhr_body_frame  # noqa: E402
+from rom_visualization_scripts.mhr_shoulder import build_mhr_body_frame  # noqa: E402
 
 
 def _draw_hip_rotation_measurement(

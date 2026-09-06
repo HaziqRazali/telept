@@ -17,14 +17,14 @@ For a SAM-3D-Body rendered video, which contains only frames with valid MHR
 detections, run:
 
     /home/haziq/anaconda3/envs/mhr_new/bin/python \
-        /data/haziq/telept/my_scripts/data_visualization/rom_functions/visualize_mhr_shoulder_flexion.py \
+        /data/haziq/telept/my_scripts/data_visualization/rom_visualization_scripts/visualize_mhr_shoulder_flexion.py \
         /data/haziq/mocap/data/brett/train/s01/sam3d/cam0/adhesive_capsulitis_mhr_outputs.npz \
         --time 7.374 --movement flexion
 
 For shoulder rotation, for example:
 
     /home/haziq/anaconda3/envs/mhr_new/bin/python \
-        /data/haziq/telept/my_scripts/data_visualization/rom_functions/visualize_mhr_shoulder_flexion.py \
+        /data/haziq/telept/my_scripts/data_visualization/rom_visualization_scripts/visualize_mhr_shoulder_flexion.py \
         /data/haziq/mocap/data/brett/train/s01/sam3d/cam0/adhesive_capsulitis_mhr_outputs.npz \
         --time 15.982 --movement external_rotation --side right
 
@@ -61,7 +61,7 @@ for import_path in (DATA_VISUALIZATION_DIR, SCRIPT_DIR):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
 
-from rom_functions.mhr_shoulder import (  # noqa: E402
+from rom_visualization_scripts.mhr_shoulder import (  # noqa: E402
     MHR_BODY_EDGES,
     MHR_JOINTS,
     ShoulderROMResult,
