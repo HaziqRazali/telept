@@ -35,10 +35,12 @@ from my_scripts.data_evaluation.rgbd_geometry import (  # noqa: E402
     METRIC_LABELS,
     METRIC_TEMPLATES,
     compute_metric,
+    compute_paired_metric,
     lift_points_2d,
     load_mmpose_json,
     metric_needs_reference,
     metric_pose_points,
+    metric_uses_torso_frame,
     mmpose_points_for_frame,
     normalize_points,
     read_video_frame,
@@ -58,14 +60,15 @@ DATA_ROOT = Path(
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 ANNOTATION_SCHEMA_VERSION = 2
 MMPose_QA_SCORE_THRESHOLD = 0.5
-TASK_SCHEMA_VERSION = 2
+TASK_SCHEMA_VERSION = 3
 TASK_ANNOTATION_SCHEMA_VERSION = 1
 ADMIN_USERNAME = os.environ.get("ROM_ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ROM_ADMIN_PASSWORD", "")
-ANNOTATOR_PASSWORD = os.environ.get(
-    "ROM_ANNOTATOR_PASSWORD", os.environ.get("ROM_PASSWORD", "")
-)
-ROLE_AUTH_CONFIGURED = bool(ADMIN_PASSWORD or os.environ.get("ROM_ANNOTATOR_PASSWORD"))
+# TEMPORARY LOCAL-ONLY TESTING MODE: both roles use the same password.
+# Restore environment-based passwords before exposing this service anywhere
+# other than 127.0.0.1.
+ADMIN_PASSWORD = "123"
+ANNOTATOR_PASSWORD = "123"
+ROLE_AUTH_CONFIGURED = True
 
 os.makedirs(IMAGES_DIR, exist_ok=True)
 os.makedirs(ANNOT_DIR, exist_ok=True)
@@ -304,15 +307,18 @@ def _normalize_task(raw_task, recording, position=0):
     metric = raw_task.get("metric")
     if metric not in METRIC_TEMPLATES:
         raise ValueError(f"unsupported task metric: {metric}")
-    # Plane-angle ROM tests (shoulder/hip) are measured against a NEUTRAL
-    # reference axis, so they use a T1=neutral / T2=peak task. Hinge tests
-    # (elbow / knee / ankle) are intrinsic and single-frame. A plane-angle task
-    # that has no explicit T2 falls back to single-frame (same-frame reference)
-    # for backward compatibility.
-    is_paired = (
-        (metric_needs_reference(metric) and raw_task.get("t2_frame_index") is not None)
-        or raw_task.get("frame_mode") == "paired"
-    )
+    requires_pair = metric_needs_reference(metric)
+    requested_mode = raw_task.get("frame_mode")
+    if requested_mode not in {None, "single", "paired"}:
+        raise ValueError(f"task {position} has invalid frame_mode")
+    if requires_pair and requested_mode == "single":
+        raise ValueError(f"{METRIC_LABELS[metric]} requires T1 and T2 frames")
+    if not requires_pair and requested_mode == "paired":
+        raise ValueError(f"{METRIC_LABELS[metric]} uses one frame")
+    # The metric definition is authoritative. Paired segment metrics always
+    # receive a neutral/baseline T1 and peak/end-range T2; hinges and axial
+    # rotations always receive one fixed frame.
+    is_paired = requires_pair
     if is_paired:
         t1 = _task_frame(
             raw_task.get("t1_frame_index", raw_task.get("frame_index")),
@@ -336,15 +342,17 @@ def _normalize_task(raw_task, recording, position=0):
         default_id = f"{recording['trial']}_{metric}_{frame}"
     task_id = raw_task.get("task_id") or default_id
     task_id = _safe_component(task_id, "task_id")
+    t1_points, t2_points = metric_pose_points(metric)
+    required_points = list(dict.fromkeys((t1_points or []) + t2_points))
     task = {
         "task_id": task_id,
         "metric": metric,
         "metric_label": METRIC_LABELS[metric],
-        "required_points": list(METRIC_TEMPLATES[metric]),
+        "frame_mode": "paired" if is_paired else "single",
+        "required_points": required_points,
         "enabled": bool(raw_task.get("enabled", True)),
         "notes": str(raw_task.get("notes", "")),
     }
-    t1_points, t2_points = metric_pose_points(metric)
     if is_paired:
         task.update({
             "frame_mode": "paired",
@@ -374,11 +382,37 @@ def _normalize_task(raw_task, recording, position=0):
                 "frame": {
                     "frame_index": frame,
                     "timestamp_sec": frame / recording["video"]["frame_rate"],
-                    "required_points": list(METRIC_TEMPLATES[metric]),
+                    "required_points": required_points,
                 },
             },
         })
+    task["annotation_hint"] = _task_annotation_hint(task)
     return task
+
+
+def _task_annotation_hint(task):
+    """Short instructions shown to the annotator for a fixed task."""
+    metric = task["metric"]
+    if task.get("frame_mode") == "paired":
+        segment = "shoulder-to-elbow" if "shoulder" in metric else "hip-to-knee"
+        return (
+            f"Annotate the {segment} in both poses: T1 is neutral/baseline and "
+            "T2 is peak/end range. The ROM is the angle between those two "
+            "segment vectors; keep the trunk position as instructed by the test."
+        )
+    if metric_uses_torso_frame(metric):
+        if "shoulder" in metric:
+            return (
+                "Single frame: annotate the nose, both shoulders, both hips, "
+                "and the working-side elbow and wrist. Keep the upper arm and "
+                "elbow in the agreed rotation-test posture."
+            )
+        return (
+            "Single frame: annotate the nose, both shoulders, both hips, and "
+            "the working-side knee and ankle. Keep the hip and knee in the "
+            "agreed rotation-test posture."
+        )
+    return "Single frame: annotate all required joint landmarks."
 
 
 def _blank_task_manifest(recording):
@@ -593,7 +627,7 @@ def _task_rgbd_comparison(recording, task, points, frame=None):
             compute_metric(mmpose_lifted.points, task["metric"])
         )
         mmpose_points_for_angle = dict(mmpose_lifted.points)
-        if "shoulder" in task["metric"]:
+        if metric_uses_torso_frame(task["metric"]):
             torso_points = (
                 "nose",
                 "left_shoulder",
@@ -607,7 +641,7 @@ def _task_rgbd_comparison(recording, task, points, frame=None):
                 for name in torso_points
             )
             if has_manual_torso:
-                comparison["comparison_mode"] = "common_plane"
+                comparison["comparison_mode"] = "common_torso_frame"
                 for name in torso_points:
                     mmpose_points_for_angle[name] = manual_lifted.points[name]
         mmpose_angle = compute_metric(mmpose_points_for_angle, task["metric"])
@@ -646,14 +680,7 @@ def _lift_pose(recording, points, frame):
 
 
 def _task_rgbd_paired_comparison(recording, task, points_by_pose):
-    """ROM for a T1=neutral / T2=peak plane-angle task.
-
-    The reference 'down' axis is derived from the NEUTRAL T1 pose
-    (working-side shoulder + hip). The limb is lifted at the peak T2 pose and its
-    elevation from that fixed reference is the ROM. Using the T1 (neutral) trunk
-    axis keeps the reference stable and flat even when the person leans at the
-    peak of the movement.
-    """
+    """ROM for a T1=neutral / T2=peak segment-excursion task."""
     if task.get("frame_mode") != "paired":
         raise ValueError("paired comparison requires a paired task")
     if recording["depth_path"] is None:
@@ -662,43 +689,81 @@ def _task_rgbd_paired_comparison(recording, task, points_by_pose):
     t2_def = task["poses"]["t2"]
     t1_points = points_by_pose.get("t1", {})
     t2_points = points_by_pose.get("t2", {})
-    side = task["metric"].split("_", 1)[0]
 
     t1_lifted = _lift_pose(recording, t1_points, t1_def["frame_index"])
     t2_lifted = _lift_pose(recording, t2_points, t2_def["frame_index"])
-    reference_down = (
-        t1_lifted.points[f"{side}_hip"] - t1_lifted.points[f"{side}_shoulder"]
+    manual_rom = compute_paired_metric(
+        t1_lifted.points,
+        t2_lifted.points,
+        task["metric"],
     )
-    # The neutral (T1) frame supplies the reference trunk points (shoulder+hip),
-    # while the peak (T2) frame supplies the moving limb. Merge them so the
-    # metric has every required joint; T2 overrides T1 for the limb direction.
-    manual_combined = dict(t1_lifted.points)
-    manual_combined.update(t2_lifted.points)
-    manual_rom = compute_metric(
-        manual_combined, task["metric"], reference_down=reference_down
-    )
+    t1_required = task["poses"]["t1"].get("required_points", [])
+    t2_required = task["poses"]["t2"].get("required_points", [])
+    missing_manual_by_pose = {
+        pose: [
+            name
+            for name in required
+            if name not in lifted.points
+            or not np.isfinite(lifted.points[name]).all()
+        ]
+        for pose, required, lifted in (
+            ("t1", t1_required, t1_lifted),
+            ("t2", t2_required, t2_lifted),
+        )
+    }
 
     mmpose_rom = None
+    mmpose_points_t1 = {}
     mmpose_points_t2 = {}
+    missing_mmpose_by_pose = {"t1": list(t1_required), "t2": list(t2_required)}
     mmpose_error = None
     if recording["mmpose_path"] is not None:
         try:
             labels, keypoints, scores = _cached_mmpose(
                 str(recording["mmpose_path"]), MMPose_QA_SCORE_THRESHOLD
             )
-            mmpose_2d = mmpose_points_for_frame(
-                labels, keypoints, scores, t2_def["frame_index"],
-                MMPose_QA_SCORE_THRESHOLD,
+            mmpose_points_by_pose = {
+                "t1": mmpose_points_for_frame(
+                    labels,
+                    keypoints,
+                    scores,
+                    t1_def["frame_index"],
+                    MMPose_QA_SCORE_THRESHOLD,
+                ),
+                "t2": mmpose_points_for_frame(
+                    labels,
+                    keypoints,
+                    scores,
+                    t2_def["frame_index"],
+                    MMPose_QA_SCORE_THRESHOLD,
+                ),
+            }
+            mmpose_lifted_by_pose = {
+                pose: _lift_pose(
+                    recording,
+                    points,
+                    task["poses"][pose]["frame_index"],
+                )
+                for pose, points in mmpose_points_by_pose.items()
+            }
+            mmpose_rom = compute_paired_metric(
+                mmpose_lifted_by_pose["t1"].points,
+                mmpose_lifted_by_pose["t2"].points,
+                task["metric"],
             )
-            mmpose_lifted = _lift_pose(recording, mmpose_2d, t2_def["frame_index"])
-            # Use the manual neutral reference axis so the comparison isolates
-            # the limb detector's error (same reference for both).
-            mmpose_combined = dict(t1_lifted.points)
-            mmpose_combined.update(mmpose_lifted.points)
-            mmpose_rom = compute_metric(
-                mmpose_combined, task["metric"], reference_down=reference_down
-            )
-            mmpose_points_t2 = mmpose_2d
+            mmpose_points_t1 = mmpose_points_by_pose["t1"]
+            mmpose_points_t2 = mmpose_points_by_pose["t2"]
+            missing_mmpose_by_pose = {
+                pose: [
+                    name
+                    for name in task["poses"][pose].get("required_points", [])
+                    if name not in mmpose_lifted_by_pose[pose].points
+                    or not np.isfinite(
+                        mmpose_lifted_by_pose[pose].points[name]
+                    ).all()
+                ]
+                for pose in ("t1", "t2")
+            }
         except (OSError, ValueError, IndexError, KeyError, TypeError) as error:
             mmpose_error = str(error)
 
@@ -713,15 +778,20 @@ def _task_rgbd_paired_comparison(recording, task, points_by_pose):
         "manual_rom_deg": _json_number(manual_rom),
         "mmpose_rom_deg": _json_number(mmpose_rom),
         "signed_error_deg": signed_error,
-        "manual_t1_angle_deg": _json_number(manual_rom),
-        "manual_t2_angle_deg": _json_number(manual_rom),
+        "manual_t1_angle_deg": None,
+        "manual_t2_angle_deg": None,
         "manual_delta_deg": _json_number(manual_rom),
-        "mmpose_t1_angle_deg": _json_number(mmpose_rom),
-        "mmpose_t2_angle_deg": _json_number(mmpose_rom),
+        "mmpose_t1_angle_deg": None,
+        "mmpose_t2_angle_deg": None,
         "mmpose_delta_deg": _json_number(mmpose_rom),
-        "mmpose_points_by_pose": {"t1": {}, "t2": mmpose_points_t2},
+        "manual_missing_points_by_pose": missing_manual_by_pose,
+        "mmpose_missing_points_by_pose": missing_mmpose_by_pose,
+        "mmpose_points_by_pose": {
+            "t1": mmpose_points_t1,
+            "t2": mmpose_points_t2,
+        },
         "mmpose_score_threshold": MMPose_QA_SCORE_THRESHOLD,
-        "comparison_mode": "neutral_reference",
+        "comparison_mode": "paired_segment_excursion",
         "mmpose_error": mmpose_error,
         "revealed": True,
     }
@@ -824,6 +894,8 @@ def _normalized_dataset_annotation(annotation, recording, user):
 
 
 def _json_number(value):
+    if value is None:
+        return None
     value = float(value)
     return value if value == value and abs(value) != float("inf") else None
 
@@ -840,7 +912,16 @@ def config():
         "data_root": str(DATA_ROOT),
         "annotation_schema_version": ANNOTATION_SCHEMA_VERSION,
         "metrics": [
-            {"key": key, "label": METRIC_LABELS[key], "points": points}
+            {
+                "key": key,
+                "label": METRIC_LABELS[key],
+                "points": list(points),
+                "frame_mode": "paired" if metric_needs_reference(key) else "single",
+                "pose_points": {
+                    "t1": metric_pose_points(key)[0] or [],
+                    "t2": metric_pose_points(key)[1],
+                },
+            }
             for key, points in METRIC_TEMPLATES.items()
         ],
     })
@@ -1044,79 +1125,56 @@ def preview_task_manual_rgbd():
     try:
         recording, _, task = _task_request(payload)
         pose, definition = _task_pose(task, payload.get("pose"))
-        if task.get("frame_mode") == "paired":
-            points_by_pose = payload.get("blind_points_2d_by_pose", {})
-            points = normalize_points(points_by_pose.get(pose, {}))
-        else:
-            points = normalize_points(payload.get("blind_points_2d", payload.get("points_2d", {})))
         if recording["depth_path"] is None:
             raise FileNotFoundError("depth archive not found")
-        reader = DepthZipReader(str(recording["depth_path"]))
-        try:
-            lifted = lift_points_2d(
-                points,
-                reader,
-                definition["frame_index"],
-                recording["video"]["width"],
-                recording["video"]["height"],
-                2,
+        if task.get("frame_mode") == "paired":
+            points_by_pose = payload.get("blind_points_2d_by_pose", {})
+            lifted_by_pose = {}
+            for pose_name in _task_pose_keys(task):
+                pose_definition = task["poses"][pose_name]
+                lifted_by_pose[pose_name] = _lift_pose(
+                    recording,
+                    normalize_points(points_by_pose.get(pose_name, {})),
+                    pose_definition["frame_index"],
+                )
+            lifted = lifted_by_pose[pose]
+            angle = compute_paired_metric(
+                lifted_by_pose["t1"].points,
+                lifted_by_pose["t2"].points,
+                task["metric"],
             )
-        finally:
-            reader.close()
-        pose_required = task["poses"][pose].get(
-            "required_points", task["required_points"]
-        )
-        missing_points = [
-            name
-            for name in pose_required
-            if name not in lifted.points or not np.isfinite(lifted.points[name]).all()
-        ]
-        missing_depth = [
-            name
-            for name, value in lifted.depths.items()
-            if not np.isfinite(value)
-        ]
-
-        # A live ROM for a paired plane-angle task needs the neutral reference
-        # (T1 shoulder+hip) plus the limb (T2), so compute it from both poses.
-        angle = None
-        if task.get("frame_mode") == "paired" and metric_needs_reference(task["metric"]):
-            try:
-                points_by_pose = payload.get("blind_points_2d_by_pose", {})
-                side = task["metric"].split("_", 1)[0]
-                t1_def = task["poses"]["t1"]
-                t2_def = task["poses"]["t2"]
-                reader = DepthZipReader(str(recording["depth_path"]))
-                try:
-                    t1_l = lift_points_2d(
-                        normalize_points(points_by_pose.get("t1", {})), reader,
-                        t1_def["frame_index"], recording["video"]["width"],
-                        recording["video"]["height"], 2,
-                    )
-                    t2_l = lift_points_2d(
-                        normalize_points(points_by_pose.get("t2", {})), reader,
-                        t2_def["frame_index"], recording["video"]["width"],
-                        recording["video"]["height"], 2,
-                    )
-                finally:
-                    reader.close()
-                reference_down = (
-                    t1_l.points[f"{side}_hip"] - t1_l.points[f"{side}_shoulder"]
-                )
-                combined = dict(t1_l.points)
-                combined.update(t2_l.points)
-                angle = compute_metric(
-                    combined, task["metric"], reference_down=reference_down
-                )
-                missing_points = [
-                    name
-                    for p in ("t1", "t2")
-                    for name in task["poses"][p].get("required_points", [])
-                    if name not in normalize_points(points_by_pose.get(p, {}))
-                ]
-            except (OSError, ValueError, IndexError, KeyError, TypeError):
-                angle = None
+            missing_points = [
+                f"{pose_name}: {name}"
+                for pose_name in _task_pose_keys(task)
+                for name in task["poses"][pose_name].get("required_points", [])
+                if name not in lifted_by_pose[pose_name].points
+                or not np.isfinite(lifted_by_pose[pose_name].points[name]).all()
+            ]
+            missing_depth = [
+                f"{pose_name}: {name}"
+                for pose_name in _task_pose_keys(task)
+                for name, value in lifted_by_pose[pose_name].depths.items()
+                if not np.isfinite(value)
+            ]
         else:
+            points = normalize_points(
+                payload.get("blind_points_2d", payload.get("points_2d", {}))
+            )
+            lifted = _lift_pose(recording, points, definition["frame_index"])
+            pose_required = task["poses"][pose].get(
+                "required_points", task["required_points"]
+            )
+            missing_points = [
+                name
+                for name in pose_required
+                if name not in lifted.points
+                or not np.isfinite(lifted.points[name]).all()
+            ]
+            missing_depth = [
+                name
+                for name, value in lifted.depths.items()
+                if not np.isfinite(value)
+            ]
             angle = compute_metric(lifted.points, task["metric"])
         return jsonify({
             "task_id": task["task_id"],
@@ -1619,7 +1677,7 @@ def preview_rgbd_metric():
                     mmpose_lifted.points, metric
                 )
                 mmpose_points_for_angle = dict(mmpose_lifted.points)
-                if "shoulder" in metric:
+                if metric_uses_torso_frame(metric):
                     manual_torso_points = (
                         "nose",
                         "left_shoulder",
@@ -1632,7 +1690,7 @@ def preview_rgbd_metric():
                         for name in manual_torso_points
                     )
                     comparison_mode = (
-                        "common_plane" if has_manual_torso else "independent"
+                        "common_torso_frame" if has_manual_torso else "independent"
                     )
                     if has_manual_torso:
                         for name in manual_torso_points:

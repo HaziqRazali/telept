@@ -35,8 +35,10 @@
   .stage-wrap { overflow:auto; display:flex; align-items:center; justify-content:center; padding:18px; }
   #stage { position:relative; max-width:100%; max-height:100%; line-height:0; }
   #frameImage { display:block; max-width:min(100%,900px); max-height:calc(100vh - 190px); width:auto; height:auto; }
-  #framebar { display:grid; grid-template-columns:auto 1fr 90px auto; gap:8px; align-items:center; padding:8px 14px; border-top:1px solid var(--line); }
+  #framebar { display:grid; grid-template-columns:auto minmax(100px,1fr) 90px auto auto; gap:8px; align-items:center; padding:8px 14px; border-top:1px solid var(--line); }
   #framebar input[type=range] { padding:0; }
+  .task-pose-controls { display:flex; gap:6px; align-items:center; }
+  .task-pose-controls button.active { border-color:var(--accent); background:#164e63; }
   .task-row { display:grid; grid-template-columns:1fr 70px auto; gap:6px; align-items:center; margin:7px 0; }
   .task-row small { color:var(--muted); }
   .task-row button { padding:4px 7px; }
@@ -60,6 +62,7 @@
   <main>
     <div class="toolbar">
       <span id="recordingTitle" class="muted">No recording selected</span>
+      <div id="taskPoseControls" class="task-pose-controls" style="display:none"><button id="taskT1Button" onclick="openTaskPose('t1')">T1 Neutral</button><button id="taskT2Button" onclick="openTaskPose('t2')">T2 Peak</button></div>
       <span id="currentUser" class="user">admin</span>
     </div>
     <div class="stage-wrap"><div id="stage"><img id="frameImage" alt="selected RGB video frame"></div></div>
@@ -67,6 +70,7 @@
       <button onclick="stepFrame(-1)">Prev</button>
       <input id="frameSlider" type="range" min="0" max="0" value="0" oninput="setFrame(this.value)">
       <input id="frameInput" type="number" min="0" value="0" onchange="setFrame(this.value)">
+      <span id="currentTimestamp" class="muted">0.000 s</span>
       <button onclick="stepFrame(1)">Next</button>
     </div>
   </main>
@@ -74,12 +78,12 @@
     <section class="section">
       <h3>Task to add</h3>
       <div class="field"><label for="metric">Metric</label><select id="metric" onchange="updateTaskFrameFields()"></select></div>
-      <div id="singleFrameField" class="field"><label for="taskFrame">Frame index</label><input id="taskFrame" type="number" min="0" value="0" onchange="setFrame(this.value)"></div>
+      <div id="singleFrameField" class="field"><label for="taskFrame">Frame index</label><input id="taskFrame" type="number" min="0" value="0" onchange="setFrame(this.value)"><small id="singleFrameHint" class="muted">Timestamp: 0.000 s</small></div>
       <div id="pairedFrameFields" class="paired-fields" style="display:none">
-        <small>Plane-angle tests (shoulder/hip) are measured against a neutral reference.</small>
-        <div class="paired-frame"><div class="field" style="margin:0"><label for="taskT1Frame">Neutral pose (T1 frame)</label><input id="taskT1Frame" type="number" min="0" value="0"></div><button onclick="useCurrentFrame('t1')">Use current</button></div>
-        <div class="paired-frame"><div class="field" style="margin:0"><label for="taskT2Frame">Peak pose (T2 frame)</label><input id="taskT2Frame" type="number" min="0" value="1"></div><button onclick="useCurrentFrame('t2')">Use current</button></div>
-        <small id="pairedHint">ROM = limb at the peak (T2) vs. the trunk down-axis at the neutral (T1).</small>
+        <small id="pairedDescription">T1 and T2 use the same segment endpoints.</small>
+        <div class="paired-frame"><div class="field" style="margin:0"><label for="taskT1Frame">Neutral/baseline pose (T1 frame)</label><input id="taskT1Frame" type="number" min="0" value="0" oninput="updateTaskTimestampDisplays()"><small id="taskT1Timestamp" class="muted">Timestamp: 0.000 s</small></div><button onclick="useCurrentFrame('t1')">Use current</button></div>
+        <div class="paired-frame"><div class="field" style="margin:0"><label for="taskT2Frame">Peak/end-range pose (T2 frame)</label><input id="taskT2Frame" type="number" min="0" value="1" oninput="updateTaskTimestampDisplays()"><small id="taskT2Timestamp" class="muted">Timestamp: 0.033 s</small></div><button onclick="useCurrentFrame('t2')">Use current</button></div>
+        <small id="pairedHint">ROM is the angle between the segment at T1 and T2.</small>
       </div>
       <div class="field"><label for="taskId">Task ID (optional)</label><input id="taskId" placeholder="auto-generated"></div>
       <div class="field"><label for="taskNotes">Admin note</label><textarea id="taskNotes" placeholder="Optional instruction or context"></textarea></div>
@@ -99,6 +103,7 @@ let recordings = [];
 let recording = null;
 let config = {metrics: []};
 let tasks = [];
+let openedTask = null;
 let currentFrame = 0;
 let requestNumber = 0;
 
@@ -111,6 +116,7 @@ async function api(path, options = {}) {
 }
 function showStatus(kind, message) { const status=$('#status'); status.className='show '+kind; status.textContent=message; clearTimeout(status.timer); status.timer=setTimeout(()=>status.className='',4000); }
 function esc(value) { return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function selectedMetric() { return config.metrics.find(item=>item.key===$('#metric').value)||null; }
 async function loadConfig() { config=await api('/api/config'); $('#metric').innerHTML=config.metrics.map(item=>`<option value="${esc(item.key)}">${esc(item.label)}</option>`).join(''); updateTaskFrameFields(); }
 async function loadRecordings() {
   try {
@@ -121,28 +127,32 @@ async function loadRecordings() {
   } catch(error) { showStatus('failed',error.message); }
 }
 async function selectRecording(item) {
-  recording=item; currentFrame=0; $('#recordingTitle').textContent=item.id; $('#frameSlider').max=item.video.frame_count-1; $('#frameInput').max=item.video.frame_count-1; $('#taskFrame').max=item.video.frame_count-1; $('#taskT1Frame').max=item.video.frame_count-1; $('#taskT2Frame').max=item.video.frame_count-1;
+  recording=item; openedTask=null; currentFrame=0; $('#recordingTitle').textContent=item.id; $('#frameSlider').max=item.video.frame_count-1; $('#frameInput').max=item.video.frame_count-1; $('#taskFrame').max=item.video.frame_count-1; $('#taskT1Frame').max=item.video.frame_count-1; $('#taskT2Frame').max=item.video.frame_count-1; updateTaskTimestampDisplays(); updateTaskPoseControls();
   try { const data=await api(`/api/admin/tasks?subject=${encodeURIComponent(item.subject)}&session_id=${encodeURIComponent(item.session_id)}&trial=${encodeURIComponent(item.trial)}`); tasks=data.manifest.tasks||[]; $('#manifestPath').textContent=data.path; renderTasks(); await setFrame(0,true); await loadRecordings(); } catch(error) { showStatus('failed',error.message); }
 }
-async function setFrame(value,initial=false) { if(!recording)return; currentFrame=Math.max(0,Math.min(recording.video.frame_count-1,Math.round(Number(value)||0))); $('#frameSlider').value=currentFrame; $('#frameInput').value=currentFrame; $('#taskFrame').value=currentFrame; const n=++requestNumber; $('#frameImage').src=`/api/frame?subject=${encodeURIComponent(recording.subject)}&session_id=${encodeURIComponent(recording.session_id)}&trial=${encodeURIComponent(recording.trial)}&frame=${currentFrame}&v=${n}`; }
+async function setFrame(value,initial=false) { if(!recording)return; currentFrame=Math.max(0,Math.min(recording.video.frame_count-1,Math.round(Number(value)||0))); $('#frameSlider').value=currentFrame; $('#frameInput').value=currentFrame; $('#taskFrame').value=currentFrame; updateTaskTimestampDisplays(); updateTaskPoseControls(); const n=++requestNumber; $('#frameImage').src=`/api/frame?subject=${encodeURIComponent(recording.subject)}&session_id=${encodeURIComponent(recording.session_id)}&trial=${encodeURIComponent(recording.trial)}&frame=${currentFrame}&v=${n}`; }
 function stepFrame(delta) { setFrame(currentFrame+delta); }
 function pairedMetric() {
-  const metric=$('#metric').value||'';
-  // Hinge tests (elbow/knee/ankle) are intrinsic and single-frame.
-  if(/elbow|knee|ankle/.test(metric)) return false;
-  // Plane-angle tests (shoulder/hip) are measured against a neutral reference.
-  return /shoulder|hip/.test(metric);
+  return selectedMetric()?.frame_mode==='paired';
 }
-function updateTaskFrameFields() { const paired=pairedMetric(); $('#singleFrameField').style.display=paired?'none':'grid'; $('#pairedFrameFields').style.display=paired?'grid':'none'; $('#addTaskButton').textContent=paired?'Add neutral/peak (T1/T2) task':'Add task at this frame'; $('#pairedHint').style.display=paired?'block':'none'; }
-function useCurrentFrame(pose) { $(pose==='t1'?'#taskT1Frame':'#taskT2Frame').value=currentFrame; }
+function frameTimestamp(frame) { return recording?.video?.frame_rate ? (Number(frame||0)/recording.video.frame_rate).toFixed(3) : '0.000'; }
+function updateTaskTimestampDisplays() { $('#currentTimestamp').textContent=`${frameTimestamp(currentFrame)} s`; $('#singleFrameHint').textContent=`Timestamp: ${frameTimestamp($('#taskFrame').value)} s`; $('#taskT1Timestamp').textContent=`Timestamp: ${frameTimestamp($('#taskT1Frame').value)} s`; $('#taskT2Timestamp').textContent=`Timestamp: ${frameTimestamp($('#taskT2Frame').value)} s`; }
+function taskPoseFrame(pose) { return pose==='t1'?openedTask?.t1_frame_index:openedTask?.t2_frame_index; }
+function updateTaskPoseControls() { const paired=openedTask?.frame_mode==='paired'; const controls=$('#taskPoseControls'); controls.style.display=paired?'flex':'none'; if(!paired)return; const t1=taskPoseFrame('t1'); const t2=taskPoseFrame('t2'); $('#taskT1Button').textContent=`T1 Neutral · ${t1} (${frameTimestamp(t1)} s)`; $('#taskT2Button').textContent=`T2 Peak · ${t2} (${frameTimestamp(t2)} s)`; $('#taskT1Button').classList.toggle('active',currentFrame===t1); $('#taskT2Button').classList.toggle('active',currentFrame===t2); }
+function openTaskPose(pose) { const frame=taskPoseFrame(pose); if(frame!==undefined&&frame!==null)setFrame(frame); }
+function openTask(task) { openedTask=task; updateTaskPoseControls(); setFrame(task.frame_mode==='paired'?task.t1_frame_index:task.frame_index); }
+function openTaskByIndex(index) { if(tasks[index])openTask(tasks[index]); }
+function updateTaskFrameFields() { const paired=pairedMetric(); const info=selectedMetric(); $('#singleFrameField').style.display=paired?'none':'grid'; $('#pairedFrameFields').style.display=paired?'grid':'none'; $('#addTaskButton').textContent=paired?'Add neutral/peak (T1/T2) task':'Add single-frame task'; $('#pairedHint').style.display=paired?'block':'none'; $('#pairedDescription').textContent=info?.pose_points?.t1?.length?`Annotate ${info.pose_points.t1.join(', ')} in both T1 and T2 frames.`:'T1 and T2 use the same segment endpoints.'; updateTaskTimestampDisplays(); }
+function useCurrentFrame(pose) { $(pose==='t1'?'#taskT1Frame':'#taskT2Frame').value=currentFrame; updateTaskTimestampDisplays(); }
 function addTask() {
   if(!recording)return; const metric=$('#metric').value; const paired=pairedMetric(); const frame=Number($('#taskFrame').value); const t1=Number($('#taskT1Frame').value); const t2=Number($('#taskT2Frame').value); const custom=$('#taskId').value.trim(); const id=custom||(paired?`${recording.trial}_${metric}_${t1}_${t2}`:`${recording.trial}_${metric}_${frame}`);
   if(tasks.some(task=>task.task_id===id)){showStatus('failed','Task ID already exists');return;}
+  const values=paired?[t1,t2]:[frame]; if(values.some(value=>!Number.isInteger(value)||value<0||value>=recording.video.frame_count)){showStatus('failed','Choose valid frame indices');return;}
   if(paired && t1===t2){showStatus('failed','T1 and T2 must be different frames');return;}
-  tasks.push(paired?{task_id:id,metric,t1_frame_index:t1,t2_frame_index:t2,enabled:true,notes:$('#taskNotes').value}:{task_id:id,metric,frame_index:frame,enabled:true,notes:$('#taskNotes').value}); $('#taskId').value=''; $('#taskNotes').value=''; renderTasks();
+  tasks.push(paired?{task_id:id,metric,frame_mode:'paired',t1_frame_index:t1,t2_frame_index:t2,enabled:true,notes:$('#taskNotes').value}:{task_id:id,metric,frame_mode:'single',frame_index:frame,enabled:true,notes:$('#taskNotes').value}); $('#taskId').value=''; $('#taskNotes').value=''; renderTasks();
 }
-function removeTask(index) { tasks.splice(index,1); renderTasks(); }
-function renderTasks() { const list=$('#taskList'); list.innerHTML=''; if(!tasks.length){list.innerHTML='<span class="muted">No tasks saved for this recording</span>';return;} tasks.forEach((task,index)=>{ const row=document.createElement('div'); row.className='task-row'; const paired=task.frame_mode==='paired'||task.t1_frame_index!==undefined; const frameText=paired?`T1 ${task.t1_frame_index} -> T2 ${task.t2_frame_index}`:`frame ${task.frame_index}`; const openFrame=paired?task.t1_frame_index:task.frame_index; row.innerHTML=`<div><strong>${esc(task.metric_label||config.metrics.find(item=>item.key===task.metric)?.label||task.metric)}</strong><br><small>${esc(task.task_id)} / ${frameText}</small></div><button onclick="setFrame(${openFrame})">Open</button><button class="danger" onclick="removeTask(${index})">X</button>`; list.appendChild(row); }); }
+function removeTask(index) { const removed=tasks[index]; tasks.splice(index,1); if(openedTask?.task_id===removed?.task_id){openedTask=null;updateTaskPoseControls();} renderTasks(); }
+function renderTasks() { const list=$('#taskList'); list.innerHTML=''; if(!tasks.length){list.innerHTML='<span class="muted">No tasks saved for this recording</span>';return;} tasks.forEach((task,index)=>{ const row=document.createElement('div'); row.className='task-row'; const paired=task.frame_mode==='paired'; const frameText=paired?`T1 ${task.t1_frame_index} (${frameTimestamp(task.t1_frame_index)} s) -> T2 ${task.t2_frame_index} (${frameTimestamp(task.t2_frame_index)} s)`:`frame ${task.frame_index} (${frameTimestamp(task.frame_index)} s)`; row.innerHTML=`<div><strong>${esc(task.metric_label||config.metrics.find(item=>item.key===task.metric)?.label||task.metric)}</strong><br><small>${esc(task.task_id)} / ${frameText}</small></div><button onclick="openTaskByIndex(${index})">Open</button><button class="danger" onclick="removeTask(${index})">X</button>`; list.appendChild(row); }); }
 async function saveTasks() { if(!recording)return; try { const data=await api('/api/admin/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subject:recording.subject,session_id:recording.session_id,trial:recording.trial,tasks})}); tasks=data.manifest.tasks; $('#manifestPath').textContent=data.path; renderTasks(); showStatus('',`Saved ${tasks.length} task(s)`); } catch(error){showStatus('failed',error.message);} }
 async function logout(){await fetch('/api/logout',{method:'POST'});location.href='/';}
 loadConfig().then(loadRecordings).catch(error=>showStatus('failed',error.message));

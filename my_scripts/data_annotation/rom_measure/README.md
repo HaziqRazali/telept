@@ -17,6 +17,11 @@ ROM_ADMIN_PASSWORD=use-a-private-admin-password
 ROM_ANNOTATOR_PASSWORD=use-a-private-annotator-password
 ```
 
+For temporary localhost testing, this checkout currently uses `123` for both
+admin and annotator passwords. Do not expose the service outside
+`127.0.0.1` while this testing mode is enabled; restore the environment-based
+passwords before deployment.
+
 The username `admin` (or `ROM_ADMIN_USERNAME`) with the admin password opens
 `/admin`, where fixed annotation tasks can be created. Any other username with
 the annotator password opens `/`, where only assigned tasks are visible.
@@ -40,10 +45,11 @@ MMPose values are not returned by the task endpoints before step 3.
 - Log in with an annotator username and the annotator password.
 - Choose an assigned task from the task list. The task already fixes the
   recording, exact frame, and metric type.
-- Place the required semantic points in the RGB image with Space. Drag with the
-  left or middle mouse button to pan a zoomed frame; `Reset all keypoints`
-  clears the current task's manual placements, including both poses in a
-  paired task. Depth is read from the paired depth frame.
+- Select a semantic point in the point list, then press Space over the RGB
+  image to place it. Selecting a point does not advance automatically after
+  placement. Drag with the left or middle mouse button to pan a zoomed frame;
+  `Reset all keypoints` clears the current task's manual placements, including
+  both poses in a paired task. Depth is read from the paired depth frame.
 - Save a draft if needed. MMPose remains hidden.
 - Click `Finish annotation` when the blind points are ready. The server locks
   those points and reveals the synchronized MMPose frame and RGBD comparison.
@@ -57,34 +63,36 @@ recomputes the authoritative angles.
 ## Admin workflow
 
 - Log in as `admin` with the admin password, then open `/admin`.
-- Select a recording, scrub to the peak/exact frame, choose a metric, and add a
-  task.
-- **Plane-angle ROM tests** (shoulder/hip) use a **T1=neutral / T2=peak task**.
-  `T1` is the neutral pose and only needs the working-side shoulder + hip; it
-  defines the trunk down-axis (`down = side_hip - side_shoulder`). `T2` is the
-  peak pose and supplies the moving limb. The ROM is the limb's elevation from
-  the neutral down-axis, so the reference stays flat even if the person leans at
-  the peak (a same-frame down-axis would tilt by 4-12°).
-- **Hinge tests** (elbow/knee/ankle) are intrinsic included angles and
-  single-frame; they need no neutral reference.
+- Select a recording, scrub to the desired frame, choose a metric, and add a
+  task. The frame index is the authoritative value; the matching video
+  timestamp is shown beside it.
+- **Paired segment-excursion tests** (shoulder and hip flexion, extension,
+  abduction, and adduction) use a **T1=neutral/baseline / T2=peak task**. The
+  same segment endpoints are annotated in both frames: shoulder-to-elbow for
+  the shoulder and hip-to-knee for the hip. ROM is the angle between those two
+  segment vectors.
+- **Single-frame tests** (shoulder/hip internal or external rotation,
+  elbow/knee flexion or extension, and ankle dorsiflexion/plantarflexion) need
+  one fixed frame. Axial-rotation tests additionally use the nose, both
+  shoulders, and both hips to construct a torso reference frame; the upper-arm,
+  elbow, hip, and knee test postures should be standardized before annotating.
+- Annotators see both T1 and T2 images side by side for paired tasks. The
+  active panel is outlined and controls which pose the point list, notes, and
+  quality fields refer to; point placements remain separate for T1 and T2.
 - Save the task manifest. External annotators then see only those predefined
   tasks and cannot choose another metric or arbitrary frame.
 
-Supported ROM metrics (both sides). Plane-angle metrics need the neutral T1
-reference (three working-side points split across two poses); hinge metrics are
-single-frame:
+Supported ROM metrics (both sides):
 
-| Region | Metric (right/left) | T1 (neutral) points | T2 (peak) points |
+| Region | Metric (right/left) | Task mode | Required points |
 |---|---|---|---|
-| Shoulder | flexion, extension, abduction, adduction, flexion/extension | shoulder, hip | shoulder, elbow |
-| Elbow | flexion, extension | — (single frame) | shoulder, elbow, wrist |
-| Hip | flexion | shoulder, hip | hip, knee |
-| Knee | flexion, extension | — (single frame) | hip, knee, ankle |
-| Ankle | dorsiflexion, plantarflexion | — (single frame) | knee, ankle, big-toe |
-
-The test label (flexion vs extension vs abduction) plus the peak frame the
-annotator picks determines the direction; the value is the limb elevation from
-the neutral down axis (0 deg = hanging/neutral).
+| Shoulder | flexion, extension, abduction, adduction | T1/T2 | shoulder, elbow in each frame |
+| Shoulder | internal/external rotation | single | nose, both shoulders, both hips, working elbow, wrist |
+| Elbow | flexion, extension | single | shoulder, elbow, wrist |
+| Hip | flexion, extension, abduction, adduction | T1/T2 | hip, knee in each frame |
+| Hip | internal/external rotation | single | nose, both shoulders, both hips, working knee, ankle |
+| Knee | flexion, extension | single | hip, knee, ankle |
+| Ankle | dorsiflexion, plantarflexion | single | knee, ankle, big-toe |
 
 ## Dataset layout
 
@@ -129,6 +137,20 @@ needed. Remote port `8080` is occupied by another Dart service.
 
 The default local root is inferred as `../../data/NUS/val` from the repository.
 Set `ROM_DATA_ROOT` explicitly when running from another checkout.
+
+### Current local milestone2 setup
+
+From this directory, stop any older server with `Ctrl+C`, then run:
+
+```bash
+ROM_DATA_ROOT=/home/haziq/datasets/telept/data/milestone2/val \
+python3 server.py --host 127.0.0.1 --port 8091
+```
+
+Open `http://127.0.0.1:8091/admin` for admin task authoring or
+`http://127.0.0.1:8091` for annotator tasks. In the current temporary
+localhost testing mode, the admin username is `admin` and both admin and
+annotator passwords are `123`.
 
 ## Annotation schema
 
@@ -185,10 +207,10 @@ python3 my_scripts/data_evaluation/evaluate_rgbd_annotations.py \
   --summary-output /tmp/rgbd_summary.json
 ```
 
-`common_plane` uses manually annotated torso points for both manual and MMPose
-arm points, isolating detector error. `independent` lets each point source
-construct its own torso frame. Mocap comparison remains a separate
-external-validity analysis.
+For single-frame axial-rotation tasks, `common_plane` uses manually annotated
+torso points for both manual and MMPose calculations, isolating limb-detector
+error. `independent` lets each point source construct its own torso frame.
+Mocap comparison remains a separate external-validity analysis.
 
 For task-review annotations, evaluate one task or all submitted tasks:
 
@@ -213,10 +235,10 @@ The task annotation file stores the blind points separately from review data:
 Each single-frame task entry includes `blind_points_2d`, `status`,
 `manual_angle_deg`, `mmpose_angle_deg`, `signed_error_deg`,
 `mmpose_reviewed`, `mmpose_agree`, and an optional `disagreement_reason`.
-Shoulder task entries are paired and instead contain `blind_points_2d_by_pose`
-for `t1` and `t2`, plus `manual_delta_deg`, `mmpose_delta_deg`, and the signed
-T1-to-T2 error. The original blind points are not replaced after MMPose is
-revealed.
+Paired shoulder/hip segment entries instead contain
+`blind_points_2d_by_pose` for `t1` and `t2`, plus `manual_delta_deg`,
+`mmpose_delta_deg`, and the signed T1-to-T2 error. The original blind points
+are not replaced after MMPose is revealed.
 
 Admin task manifests are stored separately:
 
