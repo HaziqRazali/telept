@@ -31,26 +31,48 @@ REPO_ROOT = Path(BASE_DIR).parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from my_scripts.data_evaluation.rgbd_geometry import (  # noqa: E402
-    METRIC_LABELS,
-    METRIC_TEMPLATES,
-    compute_metric,
-    compute_paired_metric,
-    lift_points_2d,
-    load_mmpose_json,
-    metric_needs_reference,
-    metric_pose_points,
-    metric_uses_torso_frame,
-    mmpose_points_for_frame,
-    normalize_points,
-    read_video_frame,
-    video_metadata,
-    DepthZipReader,
-)
-from my_scripts.data_evaluation.recordings import (  # noqa: E402
-    discover_recordings,
-    find_recording,
-)
+if __package__ in {None, ""}:
+    from rgbd_geometry import (  # noqa: E402
+        METRIC_LABELS,
+        METRIC_TEMPLATES,
+        compute_metric,
+        compute_paired_metric,
+        lift_points_2d,
+        load_mmpose_json,
+        metric_needs_reference,
+        metric_pose_points,
+        metric_uses_torso_frame,
+        mmpose_points_for_frame,
+        normalize_points,
+        read_video_frame,
+        video_metadata,
+        DepthZipReader,
+    )
+    from recordings import (  # noqa: E402
+        discover_recordings,
+        find_recording,
+    )
+else:
+    from .rgbd_geometry import (  # noqa: E402
+        METRIC_LABELS,
+        METRIC_TEMPLATES,
+        compute_metric,
+        compute_paired_metric,
+        lift_points_2d,
+        load_mmpose_json,
+        metric_needs_reference,
+        metric_pose_points,
+        metric_uses_torso_frame,
+        mmpose_points_for_frame,
+        normalize_points,
+        read_video_frame,
+        video_metadata,
+        DepthZipReader,
+    )
+    from .recordings import (  # noqa: E402
+        discover_recordings,
+        find_recording,
+    )
 
 
 DEFAULT_DATA_ROOT = REPO_ROOT / "data" / "NUS" / "val"

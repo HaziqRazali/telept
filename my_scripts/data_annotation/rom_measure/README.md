@@ -6,7 +6,9 @@ annotations are saved per user beside the NUS dataset. The Python evaluator
 then compares manual RGBD points against MMPose RGBD points.
 
 The original still-image endpoints and demo files in `images/` remain available
-for compatibility, but production NUS work uses the task browser.
+for compatibility, but production NUS work uses the task browser. The server
+and offline report tools in this directory include their own recording,
+geometry, and evaluation helpers.
 
 ## Roles and workflow
 
@@ -189,14 +191,14 @@ the task-review shape described after the evaluator command.
 
 Coordinates are original RGB pixels, not displayed CSS coordinates. The
 annotation file is the source of truth. Depth-lifted 3D points and angles are
-recomputed by `my_scripts/data_evaluation/evaluate_rgbd_annotations.py`.
+recomputed by `my_scripts/data_annotation/rom_measure/evaluate_rgbd_annotations.py`.
 
 ## Evaluation
 
 From the repository root:
 
 ```bash
-python3 my_scripts/data_evaluation/evaluate_rgbd_annotations.py \
+python3 my_scripts/data_annotation/rom_measure/evaluate_rgbd_annotations.py \
   --data-root /home/haziq/datasets/telept/data/NUS/val \
   --subject haziq_upperlimb_right_24082026 \
   --session-id session_1787566918897 \
@@ -215,7 +217,7 @@ Mocap comparison remains a separate external-validity analysis.
 For task-review annotations, evaluate one task or all submitted tasks:
 
 ```bash
-python3 my_scripts/data_evaluation/evaluate_rgbd_annotations.py \
+python3 my_scripts/data_annotation/rom_measure/evaluate_rgbd_annotations.py \
   --data-root /home/haziq/datasets/telept/data/NUS/val \
   --subject haziq_upperlimb_right_24082026 \
   --session-id session_1787566918897 \
@@ -266,7 +268,7 @@ written only by the admin role.
 For an annotated-versus-MMPose plot, use the separate report visualizer:
 
 ```bash
-python3 my_scripts/data_evaluation/plot_rgbd_annotation_comparison.py \
+python3 my_scripts/data_annotation/rom_measure/plot_rgbd_annotation_comparison.py \
   --data-root /home/haziq/datasets/telept/data/NUS/val \
   --subject haziq_upperlimb_right_24082026 \
   --session-id session_1787566918897 \
