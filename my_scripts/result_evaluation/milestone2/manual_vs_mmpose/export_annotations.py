@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Export ROM Measure 2 annotations as web-app-style comparison images.
+"""Export ROM Measure annotations as web-app-style comparison images.
 
-The script is intended to be copied into the ROM Measure 2 application
+The script is intended to be copied into the ROM Measure application
 directory, next to ``server.py``.  It deliberately reuses the application's
 saved frame extraction and saved comparison payloads instead of running a
 second MMPose pipeline.  This keeps the exported image aligned with what the
@@ -39,7 +39,7 @@ try:
     import server
 except ImportError as error:  # pragma: no cover - gives a useful CLI error
     raise SystemExit(
-        "Run this script from the ROM Measure 2 directory, or put that "
+        "Run this script from the ROM Measure directory, or put that "
         "directory on PYTHONPATH so server.py can be imported."
     ) from error
 
@@ -631,7 +631,7 @@ def _default_output_dir(username: str) -> Path:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export ROM Measure 2 annotations as side-by-side PNG comparisons."
+        description="Export ROM Measure annotations as side-by-side PNG comparisons."
     )
     parser.add_argument("--username", default="haziq", help="annotation directory/user to export")
     parser.add_argument(

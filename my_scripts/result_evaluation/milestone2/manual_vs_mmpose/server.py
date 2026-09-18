@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Small paired-video ROM annotation server.
 
-``rom_measure2`` intentionally has a narrower workflow than the original
-RGBD/MMPose application:
+``rom_measure`` is a paired-video RGBD/MMPose annotation application:
 
 * an admin imports one left/side session folder and one right/front session
   folder, or uploads one left video and one right/reference video;
@@ -67,7 +66,7 @@ from werkzeug.utils import secure_filename
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 DEFAULT_STORAGE_DIR = (
-    Path("/home/haziq/datasets/telept/data/milestone2") / "rom_measure2"
+    Path("/home/haziq/datasets/telept/data/milestone2") / "rom_measure"
 ).resolve()
 LEGACY_STORAGE_DIR = (BASE_DIR / "data").resolve()
 _storage_override = os.environ.get("ROM2_STORAGE_DIR")
@@ -1169,7 +1168,7 @@ def _public_depth(depth: dict | None) -> dict | None:
         "height": depth.get("height"),
         "display_width": depth.get("display_width"),
         "display_height": depth.get("display_height"),
-        # ``ccw90`` was written by an earlier rom_measure2 build. The raw
+        # ``ccw90`` was written by an earlier build. The raw
         # milestone2 sensor layout is now known to require clockwise rotation,
         # so expose the effective transform rather than stale index metadata.
         "rotation": (
@@ -1521,7 +1520,7 @@ def _browser_video_path(pair: dict, side: str) -> Path:
         )
         try:
             print(
-                f"[rom_measure2] Creating browser video proxy for {source.name} ({side}); please wait...",
+                f"[rom_measure] Creating browser video proxy for {source.name} ({side}); please wait...",
                 flush=True,
             )
             with subprocess.Popen(
@@ -1580,7 +1579,7 @@ def _browser_video_path(pair: dict, side: str) -> Path:
                 )
             os.replace(temporary, proxy)
             _set_browser_proxy_status(pair_id, side, "ready", 100.0, "Ready")
-            print(f"[rom_measure2] Browser video proxy ready: {proxy}", flush=True)
+            print(f"[rom_measure] Browser video proxy ready: {proxy}", flush=True)
         except subprocess.CalledProcessError as error:
             temporary.unlink(missing_ok=True)
             detail = (error.stderr or "").strip().splitlines()
@@ -1752,7 +1751,7 @@ def _read_depth_for_frame(entry: dict, frame: int) -> dict | None:
             "height": int(depth.get("height", RAW_DEPTH_HEIGHT)),
             "display_width": int(depth.get("display_width", RAW_DEPTH_DISPLAY_WIDTH)),
             "display_height": int(depth.get("display_height", RAW_DEPTH_DISPLAY_HEIGHT)),
-            # The first rom_measure2 version stored ``ccw90`` here, but that
+            # The first version stored ``ccw90`` here, but that
             # was a registration mistake rather than source-data metadata.
             # Normalize every milestone2 raw stream to the verified transform
             # so existing pair indexes are corrected on reload.
@@ -4387,7 +4386,7 @@ def _annotator_task(task_id: str) -> tuple[dict, dict]:
 
 
 def _annotation_points_payload(payload: dict) -> dict:
-    # ``left_points`` is accepted for tasks created by the first rom_measure2
+    # ``left_points`` is accepted for tasks created by the first
     # version. New tasks use the view-neutral ``points`` field.
     return payload.get("points", payload.get("left_points", {}))
 
