@@ -38,5 +38,13 @@ data/
 *.zip
 my_scripts/orbbec_scripts/Log/
 my_scripts/data_visualization/temp.py
+my_scripts/data_visualization/results/
+my_scripts/result_evaluation/milestone2/carecam/
+my_scripts/result_evaluation/milestone2/report/*_figures*/
+others/milestone2/mmpose/*.png
+others/milestone2/mhr/*.png
+others/milestone2_report/mmpose/
+others/milestone2_report/mhr/
+others/rag_workflow.jpeg
 test.ply
 telept/

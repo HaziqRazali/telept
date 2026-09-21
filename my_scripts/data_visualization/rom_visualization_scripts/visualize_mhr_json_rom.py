@@ -62,6 +62,8 @@ from rom_visualization_scripts.mhr_shoulder import (  # noqa: E402
     select_shoulder_side,
 )
 from rom_visualization_scripts.mhr_shoulder import build_mhr_body_frame  # noqa: E402
+from rom_visualization_scripts.mhr_pose_overlay import POSE_OVERLAY_CHOICES  # noqa: E402
+from rom_visualization_scripts.mhr_skin import SKIN_CHOICES  # noqa: E402
 from visualize_mhr_hip import _draw_hip_measurement  # noqa: E402
 from visualize_mhr_hip_rotation import _draw_hip_rotation_measurement  # noqa: E402
 from visualize_mhr_shoulder_flexion import (  # noqa: E402
@@ -104,6 +106,8 @@ def _planar_panel_pair(
     body_frame,
     joint: str,
     movement: str,
+    skin: str,
+    pose_overlay: str,
     width: int,
     height: int,
 ) -> list[np.ndarray]:
@@ -131,8 +135,8 @@ def _planar_panel_pair(
         body_frame.up,
         body_frame.right,
     )
-    front_panel = _render_mesh(vertices, faces, front_spec)
-    sagittal_panel = _render_mesh(vertices, faces, sagittal_spec)
+    front_panel = _render_mesh(vertices, faces, front_spec, skin=skin)
+    sagittal_panel = _render_mesh(vertices, faces, sagittal_spec, skin=skin)
 
     is_abduction = movement == "abduction"
     primary_title = (
@@ -159,6 +163,7 @@ def _planar_panel_pair(
         primary_title,
         draw_arc=primary_arc,
         draw_positive_axis=primary_positive,
+        pose_overlay=pose_overlay,
     )
     draw(
         sagittal_panel,
@@ -169,6 +174,7 @@ def _planar_panel_pair(
         draw_arc=secondary_arc,
         draw_positive_axis=secondary_positive,
         show_result_text=False,
+        pose_overlay=pose_overlay,
     )
     return [front_panel, sagittal_panel]
 
@@ -181,6 +187,8 @@ def _rotation_panel_pair(
     body_frame,
     body_pose: np.ndarray,
     joint: str,
+    skin: str,
+    pose_overlay: str,
     width: int,
     height: int,
 ) -> list[np.ndarray]:
@@ -197,10 +205,10 @@ def _rotation_panel_pair(
         body_frame.up,
         body_frame.forward,
     )
-    front_panel = _render_mesh(vertices, faces, front_spec)
+    front_panel = _render_mesh(vertices, faces, front_spec, skin=skin)
 
     axis_spec = _make_rotation_mesh_spec(vertices, result, width, height)
-    axis_panel = _render_mesh(vertices, faces, axis_spec)
+    axis_panel = _render_mesh(vertices, faces, axis_spec, skin=skin)
 
     if joint == "shoulder":
         twist_deg = mhr_uparm_twist_deg(body_pose, result.side)
@@ -211,6 +219,7 @@ def _rotation_panel_pair(
             result,
             twist_deg,
             show_result_text=True,
+            pose_overlay=pose_overlay,
         )
         _draw_rotation_measurement(
             axis_panel,
@@ -219,6 +228,7 @@ def _rotation_panel_pair(
             result,
             twist_deg,
             show_result_text=False,
+            pose_overlay=pose_overlay,
         )
     else:
         twist_deg = mhr_upleg_twist_deg(body_pose, result.side)
@@ -300,6 +310,18 @@ def main() -> None:
         default="right",
         help="Anatomical side to annotate (default: right)",
     )
+    parser.add_argument(
+        "--skin",
+        choices=SKIN_CHOICES,
+        default="original",
+        help="Mesh appearance: original or Python M_SkinFresnel port (default: original)",
+    )
+    parser.add_argument(
+        "--pose-overlay",
+        choices=POSE_OVERLAY_CHOICES,
+        default="unreal",
+        help="Pose-following joint/bone overlay style (default: unreal)",
+    )
     parser.add_argument("--video", type=Path, default=None, help="Override video path from JSON")
     parser.add_argument("--output", type=Path, default=None, help="Output PNG path")
     parser.add_argument(
@@ -307,6 +329,13 @@ def main() -> None:
         type=Path,
         default=Path("/home/haziq/MHR"),
         help="MHR repository root containing the assets",
+    )
+    parser.add_argument(
+        "--mhr-lod",
+        type=int,
+        choices=tuple(range(7)),
+        default=1,
+        help="MHR mesh LOD (default: 1; supplied Unreal skin.uasset is LOD0)",
     )
     parser.add_argument("--height", type=int, default=900, help="Panel height in pixels")
     parser.add_argument("--panel-width", type=int, default=800, help="Mesh panel width")
@@ -326,7 +355,7 @@ def main() -> None:
         time_s=args.time,
         frame_override=args.frame,
     )
-    model, faces = load_mhr_model(args.mhr_root)
+    model, faces = load_mhr_model(args.mhr_root, lod=args.mhr_lod)
     vertices, joints, body_pose = reconstruct_mhr_json_frame(frame, model)
     if not np.isfinite(vertices).all() or not np.isfinite(joints).all():
         raise RuntimeError(f"Reconstructed JSON frame {frame_idx} contains NaN/Inf values.")
@@ -365,6 +394,8 @@ def main() -> None:
             body_frame,
             body_pose,
             args.joint,
+            args.skin,
+            args.pose_overlay,
             args.panel_width,
             args.height,
         )
@@ -378,6 +409,8 @@ def main() -> None:
             body_frame,
             args.joint,
             args.movement,
+            args.skin,
+            args.pose_overlay,
             args.panel_width,
             args.height,
         )
@@ -412,6 +445,7 @@ def main() -> None:
     print(f"Joint/movement:   {args.joint} {args.movement}")
     print(f"Side:             {result.side}")
     print(f"ROM angle:        {angle:+.2f} deg")
+    print(f"Pose overlay:     {args.pose_overlay} (driven by current MHR joints)")
     print(f"Saved:            {output}")
 
 

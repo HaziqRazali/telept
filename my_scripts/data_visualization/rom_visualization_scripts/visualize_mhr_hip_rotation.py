@@ -48,11 +48,9 @@ for import_path in (DATA_VISUALIZATION_DIR, SCRIPT_DIR):
 from visualize_mhr_shoulder_flexion import (  # noqa: E402
     ACTUAL_ARM_COLOR,
     ARC_COLOR,
-    JOINT_COLOR,
     MEASURED_ARM_COLOR,
     POSITIVE_AXIS_COLOR,
     REFERENCE_COLOR,
-    SKELETON_COLOR,
     TEXT_COLOR,
     WHITE,
     _clip_point,
@@ -69,8 +67,11 @@ from visualize_mhr_shoulder_flexion import (  # noqa: E402
     _render_mesh,
     _resolve_frame,
 )
+from rom_visualization_scripts.mhr_pose_overlay import (  # noqa: E402
+    POSE_OVERLAY_CHOICES,
+    draw_pose_overlay,
+)
 from rom_visualization_scripts.mhr_hip import (  # noqa: E402
-    MHR_BODY_EDGES,
     MHR_HIP_JOINTS,
     HipRotationResult,
     compute_hip_rotation,
@@ -86,19 +87,9 @@ def _draw_hip_rotation_measurement(
     result: HipRotationResult,
     mhr_twist_deg: float | None,
     show_result_text: bool = True,
+    pose_overlay: str = "legacy",
 ) -> None:
     """Overlay the thigh/shank vectors and hip-rotation labels."""
-
-    projected_joints = spec.project(joints)
-    for a, b in MHR_BODY_EDGES:
-        cv2.line(
-            image,
-            tuple(projected_joints[a]),
-            tuple(projected_joints[b]),
-            SKELETON_COLOR,
-            2,
-            cv2.LINE_AA,
-        )
 
     key_joint_indices = [
         MHR_HIP_JOINTS["root"],
@@ -110,8 +101,15 @@ def _draw_hip_rotation_measurement(
         MHR_HIP_JOINTS["left_hip"],
         MHR_HIP_JOINTS["left_knee"],
     ]
-    for index in key_joint_indices:
-        cv2.circle(image, tuple(projected_joints[index]), 5, JOINT_COLOR, -1, cv2.LINE_AA)
+    draw_pose_overlay(
+        image,
+        spec,
+        joints,
+        style=pose_overlay,
+        line_thickness=2,
+        joint_radius=5,
+        joint_indices=key_joint_indices,
+    )
 
     p_hip = tuple(spec.project(result.hip[None, :])[0])
     p_knee = tuple(spec.project(result.knee[None, :])[0])
@@ -267,6 +265,12 @@ def main() -> None:
         default="right",
         help="Hip to annotate (default: right)",
     )
+    parser.add_argument(
+        "--pose-overlay",
+        choices=POSE_OVERLAY_CHOICES,
+        default="unreal",
+        help="Pose-following joint/bone overlay style (default: unreal)",
+    )
     parser.add_argument("--video", type=Path, default=None, help="Original video; inferred from NPZ meta")
     parser.add_argument("--output", type=Path, default=None, help="Output PNG path")
     parser.add_argument(
@@ -335,6 +339,7 @@ def main() -> None:
         result,
         mhr_twist_deg,
         show_result_text=True,
+        pose_overlay=args.pose_overlay,
     )
     _draw_hip_rotation_measurement(
         rotation_panel,
@@ -343,6 +348,7 @@ def main() -> None:
         result,
         mhr_twist_deg,
         show_result_text=False,
+        pose_overlay=args.pose_overlay,
     )
 
     # Keep the same three-panel layout as the flexion visualizations: original

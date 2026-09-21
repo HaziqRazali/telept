@@ -62,7 +62,6 @@ for import_path in (DATA_VISUALIZATION_DIR, SCRIPT_DIR):
         sys.path.insert(0, str(import_path))
 
 from rom_visualization_scripts.mhr_shoulder import (  # noqa: E402
-    MHR_BODY_EDGES,
     MHR_JOINTS,
     ShoulderROMResult,
     ShoulderRotationResult,
@@ -72,6 +71,14 @@ from rom_visualization_scripts.mhr_shoulder import (  # noqa: E402
     compute_shoulder_rotation,
     mhr_uparm_twist_deg,
     select_shoulder_side,
+)
+from rom_visualization_scripts.mhr_skin import (  # noqa: E402
+    make_render_material,
+    make_vertex_colors,
+)
+from rom_visualization_scripts.mhr_pose_overlay import (  # noqa: E402
+    POSE_OVERLAY_CHOICES,
+    draw_pose_overlay,
 )
 
 
@@ -272,7 +279,14 @@ def _make_view_spec(
     )
 
 
-def _render_mesh(vertices: np.ndarray, faces: np.ndarray, spec: ViewSpec) -> np.ndarray:
+def _render_mesh(
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    spec: ViewSpec,
+    skin: str = "original",
+) -> np.ndarray:
+    """Render one posed mesh using the requested appearance-only skin."""
+
     q_vertices = spec.coordinates(vertices)
     q_vertices[:, 0] -= spec.x_center
     q_vertices[:, 1] -= spec.y_center
@@ -281,19 +295,31 @@ def _render_mesh(vertices: np.ndarray, faces: np.ndarray, spec: ViewSpec) -> np.
     # winding in that case so lighting remains consistent in the render.
     basis = np.column_stack((spec.x_axis, spec.y_axis, spec.z_axis))
     render_faces = faces[:, ::-1] if np.linalg.det(basis) < 0.0 else faces
-    vertex_colors = np.tile(MESH_COLOR[None, :], (len(q_vertices), 1))
     mesh_trimesh = trimesh.Trimesh(
         vertices=q_vertices,
         faces=render_faces,
-        vertex_colors=vertex_colors,
         process=False,
     )
+    vertex_colors = make_vertex_colors(
+        q_vertices,
+        render_faces,
+        skin=skin,
+        normals=mesh_trimesh.vertex_normals if skin == "reskinned" else None,
+    )
+    mesh_trimesh.visual.vertex_colors = vertex_colors
 
     scene = pyrender.Scene(
         bg_color=[0.97, 0.97, 0.97, 1.0],
         ambient_light=[0.35, 0.35, 0.35],
     )
-    scene.add(pyrender.Mesh.from_trimesh(mesh_trimesh, smooth=True))
+    pyrender_mesh = pyrender.Mesh.from_trimesh(mesh_trimesh, smooth=True)
+    render_material = make_render_material(skin)
+    if render_material is not None:
+        # Mesh.from_trimesh must see the vertex colors first; replacing the
+        # generated material afterwards preserves the per-vertex alpha.
+        for primitive in pyrender_mesh.primitives:
+            primitive.material = render_material
+    scene.add(pyrender_mesh)
 
     camera = pyrender.OrthographicCamera(
         # pyrender's orthographic magnifications are half-extents (+/-),
@@ -657,19 +683,9 @@ def _draw_rotation_measurement(
     result: ShoulderRotationResult,
     mhr_twist_deg: float | None,
     show_result_text: bool = True,
+    pose_overlay: str = "legacy",
 ):
     """Overlay the humerus, forearm/reference vectors, and rotation labels."""
-
-    projected_joints = spec.project(joints)
-    for a, b in MHR_BODY_EDGES:
-        cv2.line(
-            image,
-            tuple(projected_joints[a]),
-            tuple(projected_joints[b]),
-            SKELETON_COLOR,
-            2,
-            cv2.LINE_AA,
-        )
 
     key_joint_indices = [
         MHR_JOINTS["root"],
@@ -682,8 +698,15 @@ def _draw_rotation_measurement(
         MHR_JOINTS["l_elbow"],
         MHR_JOINTS["l_wrist"],
     ]
-    for index in key_joint_indices:
-        cv2.circle(image, tuple(projected_joints[index]), 5, JOINT_COLOR, -1, cv2.LINE_AA)
+    draw_pose_overlay(
+        image,
+        spec,
+        joints,
+        style=pose_overlay,
+        line_thickness=2,
+        joint_radius=5,
+        joint_indices=key_joint_indices,
+    )
 
     p_shoulder = tuple(spec.project(result.shoulder[None, :])[0])
     p_elbow = tuple(spec.project(result.elbow[None, :])[0])
@@ -819,19 +842,9 @@ def _draw_measurement(
     draw_arc: bool = False,
     draw_positive_axis: bool = False,
     show_result_text: bool = True,
+    pose_overlay: str = "legacy",
 ):
     """Overlay skeleton, humerus/reference vectors, labels, and optional arc."""
-
-    projected_joints = spec.project(joints)
-    for a, b in MHR_BODY_EDGES:
-        cv2.line(
-            image,
-            tuple(projected_joints[a]),
-            tuple(projected_joints[b]),
-            SKELETON_COLOR,
-            2,
-            cv2.LINE_AA,
-        )
 
     key_joint_indices = [
         MHR_JOINTS["root"],
@@ -842,8 +855,15 @@ def _draw_measurement(
         MHR_JOINTS["l_shoulder"],
         MHR_JOINTS["l_elbow"],
     ]
-    for index in key_joint_indices:
-        cv2.circle(image, tuple(projected_joints[index]), 5, JOINT_COLOR, -1, cv2.LINE_AA)
+    draw_pose_overlay(
+        image,
+        spec,
+        joints,
+        style=pose_overlay,
+        line_thickness=2,
+        joint_radius=5,
+        joint_indices=key_joint_indices,
+    )
 
     p_shoulder = tuple(spec.project(result.shoulder[None, :])[0])
     p_elbow = tuple(spec.project(result.elbow[None, :])[0])
@@ -952,6 +972,12 @@ def main() -> None:
         choices=("auto", "right", "left"),
         default="auto",
         help="Shoulder to annotate (default: auto selects largest absolute angle)",
+    )
+    parser.add_argument(
+        "--pose-overlay",
+        choices=POSE_OVERLAY_CHOICES,
+        default="unreal",
+        help="Pose-following joint/bone overlay style (default: unreal)",
     )
     parser.add_argument(
         "--video",
@@ -1081,6 +1107,7 @@ def main() -> None:
             rotation_result,
             mhr_twist_deg,
             show_result_text=True,
+            pose_overlay=args.pose_overlay,
         )
         _draw_rotation_measurement(
             rotation_panel,
@@ -1089,6 +1116,7 @@ def main() -> None:
             rotation_result,
             mhr_twist_deg,
             show_result_text=False,
+            pose_overlay=args.pose_overlay,
         )
     else:
         _draw_measurement(
@@ -1099,6 +1127,7 @@ def main() -> None:
             primary_title,
             draw_arc=primary_arc,
             draw_positive_axis=primary_positive_axis,
+            pose_overlay=args.pose_overlay,
         )
         sagittal_panel = _render_mesh(vertices, faces, sagittal_spec)
         _draw_measurement(
@@ -1110,6 +1139,7 @@ def main() -> None:
             draw_arc=secondary_arc,
             draw_positive_axis=False,
             show_result_text=False,
+            pose_overlay=args.pose_overlay,
         )
 
     panels = []

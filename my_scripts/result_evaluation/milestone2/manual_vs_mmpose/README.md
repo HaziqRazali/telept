@@ -1,15 +1,15 @@
-# rom_measure2
+# rom_measure
 
-`rom_measure2` is a small paired-video ROM annotation app. It is separate from
-the original `rom_measure` app and keeps its own uploads, task index, and
+`rom_measure` is a small paired-video ROM annotation app. It keeps its own
+uploads, task index, and
 annotations by default under:
 
 ```text
-/home/haziq/datasets/telept/data/milestone2/rom_measure2/
+/data/haziq/telept/data/milestone2/rom_measure/
 ```
 
-On the first restart after this location change, an existing legacy
-`rom_measure2/data/` directory is moved there automatically.
+On the first restart after this location change, an existing legacy `data/`
+directory next to the source tree is moved there automatically.
 
 ## Workflow
 
@@ -164,7 +164,7 @@ one RGB video. For example, the supplied folder can be entered as the left
 folder:
 
 ```text
-/home/haziq/datasets/telept/data/milestone2/ipad1/030926_16-12_513_8EDDA9FF
+/data/haziq/telept/data/milestone2/ipad1/030926_16-12_513_8EDDA9FF
 ```
 
 The app discovers `rgb_video_*.mp4`, `depth_data_*`,
@@ -178,13 +178,13 @@ indexes written by the earlier counter-clockwise implementation are normalized
 to this corrected transform when loaded.
 
 For safety, folder imports are limited to `ROM2_ALLOWED_FOLDER_ROOTS`, which
-defaults to `/home/haziq/datasets/telept/data`. Set it to a colon-separated
+defaults to `/data/haziq/telept/data`. Set it to a colon-separated
 list when the source folders live elsewhere.
 
 The iPad RGB videos are HEVC/H.265, which Chrome on Linux may not play. When
 an imported or uploaded video uses an unsupported codec, the server creates a
 browser-compatible H.264 proxy on first access under
-`/home/haziq/datasets/telept/data/milestone2/rom_measure2/browser_videos/`.
+`/data/haziq/telept/data/milestone2/rom_measure/browser_videos/`.
 This requires the system `ffmpeg` executable; the first access can take some
 time for a large 4K video. The proxy is used for browser playback on the admin
 page. Annotator frames are decoded directly from the original RGB file, so
@@ -246,7 +246,7 @@ before being treated as a clinical measure.
 ## Run
 
 ```bash
-cd /home/haziq/datasets/telept/my_scripts/data_annotation/rom_measure
+cd /data/haziq/telept/my_scripts/result_evaluation/milestone2/manual_vs_mmpose
 python3 -m pip install -r requirements.txt
 ROM2_ADMIN_PASSWORD=change-me \
 ROM2_ANNOTATOR_PASSWORD=annotator-password \
@@ -280,13 +280,13 @@ ROM2_ADMIN_USERNAME=admin
 ROM2_USERS="alice:alice-password,bob:bob-password"
 ROM2_MAX_UPLOAD_MB=2048
 ROM2_SECRET=use-a-long-random-secret
-ROM2_ALLOWED_FOLDER_ROOTS=/home/haziq/datasets/telept/data
+ROM2_ALLOWED_FOLDER_ROOTS=/data/haziq/telept/data
 ```
 
 The storage directory contains:
 
 ```text
-rom_measure2/
+rom_measure/
   uploads/<pair_id>/left.<ext>
   uploads/<pair_id>/right.<ext>
   browser_videos/<pair_id>/left.mp4
