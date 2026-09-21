@@ -162,8 +162,16 @@ def reconstruct_mhr_json_frame(frame: dict, mhr_model):
     return vertices_m, joints_m, body_pose.astype(np.float64)
 
 
-def load_mhr_model(mhr_root: str | Path = "/home/haziq/MHR"):
-    """Load the Python MHR model and return ``(model, LOD1 faces)``."""
+def load_mhr_model(
+    mhr_root: str | Path = "/home/haziq/MHR",
+    lod: int = 1,
+    wants_pose_correctives: bool = True,
+):
+    """Load the Python MHR model and return ``(model, faces)``.
+
+    LOD1 remains the default used by the ROM visualizers.  The supplied
+    Unreal ``skin.uasset`` was verified against Python MHR LOD0.
+    """
 
     from mhr.mhr import MHR
 
@@ -171,7 +179,8 @@ def load_mhr_model(mhr_root: str | Path = "/home/haziq/MHR"):
     model = MHR.from_files(
         folder=root / "assets",
         device=torch.device("cpu"),
-        lod=1,
+        lod=lod,
+        wants_pose_correctives=wants_pose_correctives,
     )
     model.eval()
     faces = np.asarray(model.character.mesh.faces, dtype=np.int32)

@@ -1,0 +1,61 @@
+{
+  "board_inner_corners": [
+    8,
+    5
+  ],
+  "square_size_mm": 40.0,
+  "margin_squares": 2,
+  "coordinate_note": "board frame; origin = top-left inner corner; +X right along corners, +Y down along corners, mm",
+  "markers": [
+    {
+      "name": "Board1",
+      "x_mm": 0.0,
+      "y_mm": -80.0,
+      "z_mm": 0.0
+    },
+    {
+      "name": "Board6",
+      "x_mm": 80.0,
+      "y_mm": -80.0,
+      "z_mm": 0.0
+    },
+    {
+      "name": "Board4",
+      "x_mm": 360.0,
+      "y_mm": -40.0,
+      "z_mm": 0.0
+    },
+    {
+      "name": "Board3",
+      "x_mm": 280.0,
+      "y_mm": 240.0,
+      "z_mm": 0.0
+    },
+    {
+      "name": "Board2",
+      "x_mm": 40.0,
+      "y_mm": 240.0,
+      "z_mm": 0.0
+    },
+    {
+      "name": "Board5",
+      "x_mm": -80.0,
+      "y_mm": 120.0,
+      "z_mm": 0.0
+    }
+  ],
+  "verification": {
+    "ok": true,
+    "assigned": [
+      "Board1",
+      "Board6",
+      "Board4",
+      "Board3",
+      "Board2",
+      "Board5"
+    ],
+    "mean_dist_err_mm": 1.6522523665528164,
+    "max_dist_err_mm": 3.230367342690215,
+    "n_markers": 6
+  }
+}

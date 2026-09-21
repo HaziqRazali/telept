@@ -66,7 +66,7 @@ from werkzeug.utils import secure_filename
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 DEFAULT_STORAGE_DIR = (
-    Path("/home/haziq/datasets/telept/data/milestone2") / "rom_measure"
+    Path("/data/haziq/telept/data/milestone2") / "rom_measure"
 ).resolve()
 LEGACY_STORAGE_DIR = (BASE_DIR / "data").resolve()
 _storage_override = os.environ.get("ROM2_STORAGE_DIR")
@@ -199,7 +199,7 @@ COCO_KEYPOINT_NAME_TO_ID = {
 
 _configured_source_roots = os.environ.get(
     "ROM2_ALLOWED_FOLDER_ROOTS",
-    "/home/haziq/datasets/telept/data",
+    "/data/haziq/telept/data",
 )
 ALLOWED_FOLDER_ROOTS = tuple(
     Path(value).expanduser().resolve()
