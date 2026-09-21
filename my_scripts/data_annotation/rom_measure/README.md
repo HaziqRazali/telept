@@ -246,7 +246,7 @@ before being treated as a clinical measure.
 ## Run
 
 ```bash
-cd /home/haziq/datasets/telept/my_scripts/data_annotation/rom_measure2
+cd /home/haziq/datasets/telept/my_scripts/data_annotation/rom_measure
 python3 -m pip install -r requirements.txt
 ROM2_ADMIN_PASSWORD=change-me \
 ROM2_ANNOTATOR_PASSWORD=annotator-password \
@@ -257,6 +257,20 @@ Open `http://127.0.0.1:8092/admin` for task setup or
 `http://127.0.0.1:8092` for annotation. The local defaults are `admin` / `123`
 for the admin and any non-admin username / `123` for an annotator. Change the
 passwords before exposing the service.
+
+## Temporary remote access with Cloudflare Tunnel
+
+After starting the server, open a second terminal on the same machine and run:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8092
+```
+
+Share the generated `https://*.trycloudflare.com` URL with annotators. Keep
+both the server and `cloudflared` terminals running; the URL stops working
+when either process exits. Quick Tunnels are intended for testing and short
+annotation sessions. Use a named tunnel and Cloudflare Access for longer-term
+or restricted access.
 
 Optional settings:
 
