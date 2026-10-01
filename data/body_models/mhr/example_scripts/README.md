@@ -12,23 +12,22 @@ bash /home/haziq/datasets/telept/data/body_models/mhr/example_scripts/render_def
 bash /home/haziq/datasets/telept/data/body_models/mhr/example_scripts/render_default_reskinned.sh
 ```
 
-The wrappers default to the local `mhr_new` interpreter used for validation.
-On another checkout or host, override it without editing the scripts:
+The wrappers automatically select and activate the first available Conda
+environment containing PyTorch, preferring `pytorch_env_cu128`.  On the first
+run they install only missing lightweight renderer packages (`numpy`, OpenCV,
+PyRender, and Trimesh) into that environment.  The large PyTorch package is
+not installed automatically.
+
+To select another environment without editing the scripts:
 
 ```bash
-MHR_PYTHON=/path/to/python ./render_default_blue.sh
+MHR_CONDA_ENV=sam_3d_body bash /home/haziq/datasets/telept/data/body_models/mhr/example_scripts/render_default_blue.sh
 ```
 
-Or call the common renderer directly:
+You can also select an exact interpreter:
 
 ```bash
-/home/haziq/anaconda3/envs/mhr_new/bin/python \
-  /home/haziq/datasets/telept/data/body_models/mhr/example_scripts/render_default_mhr.py \
-  --appearance blue
-
-/home/haziq/anaconda3/envs/mhr_new/bin/python \
-  /home/haziq/datasets/telept/data/body_models/mhr/example_scripts/render_default_mhr.py \
-  --appearance reskinned
+MHR_PYTHON=/path/to/python bash /home/haziq/datasets/telept/data/body_models/mhr/example_scripts/render_default_blue.sh
 ```
 
 Outputs are written to:
