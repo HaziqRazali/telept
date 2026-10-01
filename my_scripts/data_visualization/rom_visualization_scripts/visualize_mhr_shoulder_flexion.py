@@ -304,14 +304,20 @@ def _render_mesh(
         q_vertices,
         render_faces,
         skin=skin,
-        normals=mesh_trimesh.vertex_normals if skin == "reskinned" else None,
+        normals=mesh_trimesh.vertex_normals if skin in {"reskinned", "dark_fresnel"} else None,
     )
     mesh_trimesh.visual.vertex_colors = vertex_colors
 
-    scene = pyrender.Scene(
-        bg_color=[0.97, 0.97, 0.97, 1.0],
-        ambient_light=[0.35, 0.35, 0.35],
-    )
+    if skin == "dark_fresnel":
+        scene = pyrender.Scene(
+            bg_color=[0.012, 0.016, 0.028, 1.0],
+            ambient_light=[0.06, 0.08, 0.13],
+        )
+    else:
+        scene = pyrender.Scene(
+            bg_color=[0.97, 0.97, 0.97, 1.0],
+            ambient_light=[0.35, 0.35, 0.35],
+        )
     pyrender_mesh = pyrender.Mesh.from_trimesh(mesh_trimesh, smooth=True)
     render_material = make_render_material(skin)
     if render_material is not None:

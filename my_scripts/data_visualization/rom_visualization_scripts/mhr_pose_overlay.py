@@ -90,6 +90,7 @@ def draw_pose_overlay(
     joint_radius: int = 5,
     draw_joints: bool = True,
     joint_indices=None,
+    edge_indices=None,
 ) -> np.ndarray:
     """Draw a pose-following skeleton over a rendered MHR panel.
 
@@ -107,8 +108,12 @@ def draw_pose_overlay(
         ``"legacy"`` uses the original neutral Python renderer colours;
         ``"none"`` leaves the image unchanged.
     joint_indices:
-        Optional iterable of joint indices to mark.  The lines always use all
-        ``MHR_BODY_EDGES``; omitting this argument marks every line endpoint.
+        Optional iterable of joint indices to mark. By default, every endpoint
+        in ``MHR_BODY_EDGES`` is marked.
+    edge_indices:
+        Optional iterable of ``(start, end)`` joint-index pairs. When
+        provided, only these edges are drawn. This supports compact overlays
+        that intentionally stop a chain at a selected endpoint.
 
     The line endpoints are projected directly from the supplied pose.  No
     rest-pose line mesh, skeletal animation asset, or Unreal runtime is used.
@@ -121,7 +126,16 @@ def draw_pose_overlay(
         return image
 
     joints = _validate_inputs(image, spec, joints)
-    max_index = max(max(edge) for edge in MHR_BODY_EDGES)
+    edges = tuple(MHR_BODY_EDGES if edge_indices is None else edge_indices)
+    if not edges:
+        raise ValueError("edge_indices must contain at least one joint edge")
+    normalized_edges = []
+    for edge in edges:
+        if len(edge) != 2:
+            raise ValueError(f"Each edge must contain two joint indices, got {edge!r}")
+        normalized_edges.append((int(edge[0]), int(edge[1])))
+    edges = tuple(normalized_edges)
+    max_index = max(max(edge) for edge in edges)
     if max_index >= len(joints):
         raise ValueError(
             f"MHR pose overlay needs joint index {max_index}, but only "
@@ -148,7 +162,7 @@ def draw_pose_overlay(
     line_thickness = max(1, int(line_thickness))
     joint_radius = max(1, int(joint_radius))
     used_joints: set[int] = set()
-    for a, b in MHR_BODY_EDGES:
+    for a, b in edges:
         edge = _canonical_edge(a, b)
         if style == "unreal" and edge in _RIGHT_EDGES:
             color = right_color

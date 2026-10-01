@@ -1,4 +1,9 @@
-"""Pure-Python port of the supplied Unreal ``M_SkinFresnel`` material.
+"""Appearance modes for the MHR ROM mesh renderer.
+
+The ``reskinned`` mode is a pure-Python port of the supplied Unreal
+``M_SkinFresnel`` material.  ``dark_fresnel`` is a related presentation mode
+for dark clinical-style panels: it keeps the Fresnel silhouette cue but uses
+an opaque dark body and a brighter rim so the mesh remains legible.
 
 The Unreal material is translucent. Its active graph computes opacity from the
 camera vector and vertex normal, then uses the blue-gray ``EmissiveCol``
@@ -21,7 +26,7 @@ import numpy as np
 import trimesh
 
 
-SKIN_CHOICES = ("original", "reskinned")
+SKIN_CHOICES = ("original", "reskinned", "dark_fresnel")
 
 # Keep the original renderer's appearance as the compatibility/default mode.
 ORIGINAL_MESH_COLOR = np.asarray([174, 197, 226, 255], dtype=np.uint8)
@@ -36,6 +41,13 @@ RESKIN_EMISSIVE_COLOR = np.asarray(
 # The active opacity chain in M_SkinFresnel uses these master defaults.
 RESKIN_FRESNEL_EXPONENT = 5.0
 RESKIN_FRESNEL_STRENGTH = 1.0
+
+# Presentation-only palette for the dark clinical-style mode.  These are
+# display RGB values used by the pyrender vertex-colour path, not Unreal
+# material parameters.  Geometry and topology remain unchanged.
+DARK_FRESNEL_BASE_COLOR = np.asarray([0.025, 0.040, 0.075], dtype=np.float64)
+DARK_FRESNEL_RIM_COLOR = np.asarray([0.68, 0.86, 1.0], dtype=np.float64)
+DARK_FRESNEL_RIM_POWER = 1.35
 
 
 def make_render_material(skin: str = "original"):
@@ -57,6 +69,21 @@ def make_render_material(skin: str = "original"):
 
     # Import lazily so geometry-only tests do not initialize OpenGL.
     import pyrender
+
+    if skin == "dark_fresnel":
+        # Vertex colours provide the body/rim palette.  A white base factor
+        # leaves that palette intact while the modest emission keeps the
+        # silhouette readable against the dark panel background.
+        return pyrender.MetallicRoughnessMaterial(
+            name="MHR_DarkFresnelPresentation",
+            alphaMode="OPAQUE",
+            baseColorFactor=[1.0, 1.0, 1.0, 1.0],
+            emissiveFactor=[0.22, 0.30, 0.45],
+            metallicFactor=0.0,
+            roughnessFactor=0.82,
+            doubleSided=True,
+            smooth=True,
+        )
 
     return pyrender.MetallicRoughnessMaterial(
         name="M_SkinFresnel_python",
@@ -126,6 +153,12 @@ def make_vertex_colors(
     opacity = np.power(1.0 - camera_normal_dot, RESKIN_FRESNEL_EXPONENT)
     opacity = np.clip(RESKIN_FRESNEL_STRENGTH * opacity, 0.0, 1.0)
 
+    if skin == "dark_fresnel":
+        rim = np.power(1.0 - camera_normal_dot, DARK_FRESNEL_RIM_POWER)
+        rgb = DARK_FRESNEL_BASE_COLOR[None, :] * (1.0 - rim[:, None])
+        rgb += DARK_FRESNEL_RIM_COLOR[None, :] * rim[:, None]
+        return np.column_stack((np.clip(rgb, 0.0, 1.0), np.ones(len(vertices)))).astype(np.float32)
+
     rgb = np.tile(RESKIN_EMISSIVE_COLOR[None, :], (len(vertices), 1))
     return np.column_stack((rgb, opacity)).astype(np.float32)
 
@@ -176,6 +209,9 @@ __all__ = [
     "RESKIN_EMISSIVE_COLOR",
     "RESKIN_FRESNEL_EXPONENT",
     "RESKIN_FRESNEL_STRENGTH",
+    "DARK_FRESNEL_BASE_COLOR",
+    "DARK_FRESNEL_RIM_COLOR",
+    "DARK_FRESNEL_RIM_POWER",
     "make_render_material",
     "make_vertex_colors",
     "compare_same_geometry",
