@@ -11,7 +11,7 @@ anchor_pos  (3,)    fixed end of band, Y-up world frame (m)
 limb_pos    (T, 3)  moving end attached to the limb, Y-up world frame (m)
 time        (T,)    seconds
 
-Usage (from ~/code/SMPL2AddBiomechanics):
+Usage (from ~/code/telePT/SMPL2AddBiomechanics):
   conda activate addbiomechanics
   python ~/datasets/telept/my_scripts/opensim_scripts/gen_band_endpoints.py \
       --npz    /tmp/smpl2ab_dumbbell_biceps_curls/dumbbell_biceps_curls/dumbbell_biceps_curls.npz \

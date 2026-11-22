@@ -14,7 +14,7 @@ Steps:
   6. Parse    joint moments
   7. Save     .npz for show_ab_results.py  (pass as --id_path, pipeline Step 4)
 
-Usage (from ~/code/SMPL2AddBiomechanics, pipeline Step 3):
+Usage (from ~/code/telePT/SMPL2AddBiomechanics, pipeline Step 3):
   conda activate addbiomechanics
   python ~/datasets/telept/my_scripts/opensim_scripts/resistance_band_id.py \\
       --osim_path output/dumbbell_biceps_curls/dumbbell_biceps_curls/osim_results/Models/match_markers_but_ignore_physics.osim \\

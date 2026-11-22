@@ -24,12 +24,12 @@
 # ./run_compare.sh /home/haziq/datasets/mocap/data/fit3d/train/s03/smplx/barbell_row.json output/barbell_row --offset=1 --load_camera_settings
 # Compare the two runs
 #   python ~/datasets/telept/my_scripts/opensim_scripts/compare_bony_vs_full.py \
-#       ~/code/SMPL2AddBiomechanics/output/barbell_row_full/barbell_row \
-#       ~/code/SMPL2AddBiomechanics/output/barbell_row_bony/barbell_row
+#       ~/code/telePT/SMPL2AddBiomechanics/output/barbell_row_full/barbell_row \
+#       ~/code/telePT/SMPL2AddBiomechanics/output/barbell_row_bony/barbell_row
 #
 #   python ~/datasets/telept/my_scripts/opensim_scripts/visualization_scripts/visualize_bony_vs_full.py \
-#   /home/haziq/code/SMPL2AddBiomechanics/output/barbell_row_full/barbell_row \
-#   /home/haziq/code/SMPL2AddBiomechanics/output/barbell_row_bony/barbell_row \
+#   /home/haziq/code/telePT/SMPL2AddBiomechanics/output/barbell_row_full/barbell_row \
+#   /home/haziq/code/telePT/SMPL2AddBiomechanics/output/barbell_row_bony/barbell_row \
 #   --npz /tmp/smpl2ab_barbell_row/barbell_row/barbell_row.npz \
 #   --offset 0
 
@@ -93,15 +93,15 @@ fi
 
 # select osim model + marker dict based on --markers
 if [[ "$MARKERS" == "bony" ]]; then
-  OSIM_PATH=~/code/SMPL2AddBiomechanics/models/bsm/bsm_bony.osim
-  MARKER_DICT=~/code/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers_bony.yaml
+  OSIM_PATH=~/code/telePT/SMPL2AddBiomechanics/models/bsm/bsm_bony.osim
+  MARKER_DICT=~/code/telePT/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers_bony.yaml
 else
-  OSIM_PATH=~/code/SMPL2AddBiomechanics/models/bsm/bsm.osim
-  MARKER_DICT=~/code/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers.yaml
+  OSIM_PATH=~/code/telePT/SMPL2AddBiomechanics/models/bsm/bsm.osim
+  MARKER_DICT=~/code/telePT/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers.yaml
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd ~/code/SMPL2AddBiomechanics
+cd ~/code/telePT/SMPL2AddBiomechanics
 
 # --- if input is a JSON, convert to a temp NPZ dir on the fly ---
 if [[ "$INPUT" == *.json ]]; then
@@ -159,12 +159,12 @@ done
 #   NOTE: non-fatal errors about plotting.py and "Geometry already exists" are safe to ignore
 MOT_FILE="$SUBJECT_DIR/osim_results/IK/${TRIAL}_segment_0_ik.mot"
 if [[ $VIZ_ONLY -eq 0 ]] || [[ ! -f "$MOT_FILE" ]]; then
-  python ~/code/AddBiomechanics/server/engine/src/engine.py "$SUBJECT_DIR" osim_results
+  python ~/code/telePT/AddBiomechanics/server/engine/src/engine.py "$SUBJECT_DIR" osim_results
 fi
 
 # Repair geometry: engine truncates some PLY files during VTP→PLY conversion.
 # Overwrite any output PLY that is smaller than the source with the correct file.
-export BSM_GEO=~/code/SMPL2AddBiomechanics/models/bsm/Geometry
+export BSM_GEO=~/code/telePT/SMPL2AddBiomechanics/models/bsm/Geometry
 export OUT_GEO="$SUBJECT_DIR/osim_results/Models/Geometry"
 python3 - <<'PYEOF'
 import os, shutil

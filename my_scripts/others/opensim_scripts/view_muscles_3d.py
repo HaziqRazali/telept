@@ -6,7 +6,7 @@ Requires:  conda activate addbiomechanics
 Usage
 -----
 # Static default pose (no motion needed):
-python view_muscles_3d.py --osim_path ~/code/SMPL2AddBiomechanics/models/bsm/bsm.osim
+python view_muscles_3d.py --osim_path ~/code/telePT/SMPL2AddBiomechanics/models/bsm/bsm.osim
 
 # With animated motion:
 python view_muscles_3d.py \

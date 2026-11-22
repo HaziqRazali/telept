@@ -34,10 +34,10 @@ from scipy.spatial import cKDTree
 import yaml
 
 OSIM_PATH = (
-    "/home/haziq/code/AddBiomechanics/server/data/StandardizedModels/"
+    "/home/haziq/code/telePT/AddBiomechanics/server/data/StandardizedModels/"
     "Rajagopal2015_passiveCal_hipAbdMoved.osim"
 )
-SMPL_PATH    = "/home/haziq/code/SMPL2AddBiomechanics/models/smpl/SMPL_NEUTRAL.pkl"
+SMPL_PATH    = "/home/haziq/code/telePT/SMPL2AddBiomechanics/models/smpl/SMPL_NEUTRAL.pkl"
 MAPPING_NPZ  = os.path.expanduser("~/MHR/tools/mhr_smpl_conversion/assets/smpl2mhr_mapping.npz")
 J_REG_MHR_NPY = os.path.expanduser("~/MHR/tools/mhr_smpl_conversion/assets/J_regressor_mhr.npy")
 FACES_NPY    = os.path.expanduser("~/MHR/faces.npy")

@@ -17,8 +17,8 @@ Usage
     python visualize_smpl_bsm_markers.py --no_labels            # skip text labels
     python visualize_smpl_bsm_markers.py --save_mhr_markers     # write mhr_markers.yaml
     python visualize_smpl_bsm_markers.py \\
-        --smpl_model   ~/code/SMPL2AddBiomechanics/models/smpl/SMPL_NEUTRAL.pkl \\
-        --markers_yaml ~/code/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers.yaml
+        --smpl_model   ~/code/telePT/SMPL2AddBiomechanics/models/smpl/SMPL_NEUTRAL.pkl \\
+        --markers_yaml ~/code/telePT/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers.yaml
 
 Outputs
 -------
@@ -44,8 +44,8 @@ import open3d as o3d
 
 # ── defaults ──────────────────────────────────────────────────────────────────
 
-DEFAULT_SMPL_MODEL   = "/home/haziq/code/SMPL2AddBiomechanics/models/smpl/SMPL_NEUTRAL.pkl"
-DEFAULT_MARKERS_YAML = "/home/haziq/code/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers.yaml"
+DEFAULT_SMPL_MODEL   = "/home/haziq/code/telePT/SMPL2AddBiomechanics/models/smpl/SMPL_NEUTRAL.pkl"
+DEFAULT_MARKERS_YAML = "/home/haziq/code/telePT/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers.yaml"
 
 SPHERE_RADIUS  = 0.012   # metres (~1.2 cm)
 MHR_X_OFFSET   = 1.5    # metres — how far right to shift the MHR mesh

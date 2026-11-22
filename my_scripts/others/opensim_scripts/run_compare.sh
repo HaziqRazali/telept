@@ -30,7 +30,7 @@ done
 
 STEM=$(basename "$INPUT_JSON" .json)
 
-SMPL2AB_DIR="$HOME/code/SMPL2AddBiomechanics"
+SMPL2AB_DIR="$HOME/code/telePT/SMPL2AddBiomechanics"
 
 OUT_FULL="$SMPL2AB_DIR/${OUTPUT_BASE}_full"
 OUT_BONY="$SMPL2AB_DIR/${OUTPUT_BASE}_bony"

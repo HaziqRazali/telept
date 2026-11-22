@@ -14,7 +14,7 @@
 ## Fitting BSM to SMPL motion
 
 conda activate addbiomechanics
-cd ~/code/SMPL2AddBiomechanics
+cd ~/code/telePT/SMPL2AddBiomechanics
 
 <!--
 Full pipeline shortcut — runs Steps 0–2+4 in one go (skips Step 3).
@@ -26,7 +26,7 @@ Full pipeline shortcut — runs Steps 0–2+4 in one go (skips Step 3).
   --gui            opens interactive aitviewer instead of exporting video
   --vis-only       skip Steps 0–2 if outputs already exist (re-use cached IK)
 -->
-cd ~/code/SMPL2AddBiomechanics && ~/datasets/telept/my_scripts/opensim_scripts/run_smpl2bsm.sh \
+cd ~/code/telePT/SMPL2AddBiomechanics && ~/datasets/telept/my_scripts/opensim_scripts/run_smpl2bsm.sh \
   /home/haziq/datasets/mocap/data/fit3d/train/s03/smplx/dumbbell_biceps_curls.json \
   output/dumbbell_biceps_curls --markers=full --vis --vis-only
 
@@ -51,7 +51,7 @@ Step 1: SMPL → markers.trc
           trials/01_01_poses/
             markers.trc               ← 3D marker trajectories
 -->
-cd ~/code/SMPL2AddBiomechanics
+cd ~/code/telePT/SMPL2AddBiomechanics
 
 # example
 python smpl2ab/smpl2addbio.py -i models/bsm/sample_motion/01 -o output
@@ -74,15 +74,15 @@ Step 2: IK + model scaling (AddBiomechanics engine)
           01_01_poses_segment_0_ik.mot            ← joint angles
           01_01_poses_segment_0_marker_errors.csv
   NOTE: non-fatal errors about plotting.py and "Geometry already exists" are safe to ignore
-  python ~/code/AddBiomechanics/server/engine/src/engine.py output/01 osim_results
+  python ~/code/telePT/AddBiomechanics/server/engine/src/engine.py output/01 osim_results
 -->
-cd ~/code/SMPL2AddBiomechanics
+cd ~/code/telePT/SMPL2AddBiomechanics
 
 # example
-python ~/code/AddBiomechanics/server/engine/src/engine.py output/01 osim_results
+python ~/code/telePT/AddBiomechanics/server/engine/src/engine.py output/01 osim_results
 
 # fit3d
-python ~/code/AddBiomechanics/server/engine/src/engine.py output/dumbbell_biceps_curls/dumbbell_biceps_curls osim_results
+python ~/code/telePT/AddBiomechanics/server/engine/src/engine.py output/dumbbell_biceps_curls/dumbbell_biceps_curls osim_results
 
 <!--
 Step 3 (optional, band exercises): resistance band force synthesis → OpenSim ID → joint torques
@@ -92,7 +92,7 @@ Step 3 (optional, band exercises): resistance band force synthesis → OpenSim I
   --arm        left or right (which arm/leg attaches to the band)
   --force_n    band force magnitude in Newtons  (e.g. 49.05 N ≈ 5 kg load)
 -->
-cd ~/code/SMPL2AddBiomechanics
+cd ~/code/telePT/SMPL2AddBiomechanics
 
 # fit3d
 python ~/datasets/telept/my_scripts/opensim_scripts/resistance_band_id.py \
@@ -110,7 +110,7 @@ Step 4: visualize — superimpose SMPL mesh + OpenSim IK skeleton, export video
   out:  superimp_res.mp4  (cwd) — add --gui for interactive viewer instead
   --id_path   (optional) band_id.npz from Step 3 — adds Joint Torques panel + band visualization
 -->
-cd ~/code/SMPL2AddBiomechanics
+cd ~/code/telePT/SMPL2AddBiomechanics
 
 # example
 python smpl2ab/show_ab_results.py \
@@ -136,7 +136,7 @@ python smpl2ab/show_ab_results.py \
 <!--
 Rajagopal: Full skeleton + 80 lower-body muscles. Apache 2.0. Rigid torso (no lumbar torque), simplified shoulder (no scapula).
 -->
-python view_opensim.py --osim_path ~/code/AddBiomechanics/server/data/StandardizedModels/Rajagopal2015_passiveCal_hipAbdMoved.osim
+python view_opensim.py --osim_path ~/code/telePT/AddBiomechanics/server/data/StandardizedModels/Rajagopal2015_passiveCal_hipAbdMoved.osim
 
 <!--
 # BSM: Full skeleton (skull included) + 80 lower-body muscles. Non-commercial research only (MPI-IS licence). Virtual markers shown as blue dots. Upper body torque-actuated (net joint torques only, no individual muscle forces above waist).

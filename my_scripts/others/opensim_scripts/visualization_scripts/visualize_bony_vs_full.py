@@ -2,7 +2,7 @@
 """
 Visualize two BSM runs (full vs bony markers) simultaneously in the aitviewer GUI.
 
-Usage (run from ~/code/SMPL2AddBiomechanics):
+Usage (run from ~/code/telePT/SMPL2AddBiomechanics):
   python /path/to/compare_viz.py <full_dir> <bony_dir> --npz PATH
 
   full_dir / bony_dir  subject dirs produced by run_smpl2bsm.sh
@@ -18,10 +18,10 @@ Keyboard shortcuts in the GUI:
   Scene tree panel (left): click the eye icon to toggle any layer
 
 Example:
-  cd ~/code/SMPL2AddBiomechanics
+  cd ~/code/telePT/SMPL2AddBiomechanics
   python ~/datasets/telept/my_scripts/opensim_scripts/visualization_scripts/visualize_bony_vs_full.py \
-    /home/haziq/code/SMPL2AddBiomechanics/output/barbell_row_full/barbell_row \
-    /home/haziq/code/SMPL2AddBiomechanics/output/barbell_row_bony/barbell_row \
+    /home/haziq/code/telePT/SMPL2AddBiomechanics/output/barbell_row_full/barbell_row \
+    /home/haziq/code/telePT/SMPL2AddBiomechanics/output/barbell_row_bony/barbell_row \
     --npz /tmp/smpl2ab_barbell_row/barbell_row/barbell_row.npz \
     --offset 0
 """
@@ -35,7 +35,7 @@ import numpy as np
 import yaml
 
 # must be run from (or have) SMPL2AddBiomechanics on the path
-AB_ROOT = os.path.expanduser('~/code/SMPL2AddBiomechanics')
+AB_ROOT = os.path.expanduser('~/code/telePT/SMPL2AddBiomechanics')
 for p in (AB_ROOT, os.path.join(AB_ROOT, 'smpl2ab')):
     if p not in sys.path:
         sys.path.insert(0, p)
@@ -171,10 +171,10 @@ def main():
     parser.add_argument('--body_model', default='smpl', choices=['smpl', 'smplx'])
     parser.add_argument('--full_marker_dict',
                         default=os.path.expanduser(
-                            '~/code/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers.yaml'))
+                            '~/code/telePT/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers.yaml'))
     parser.add_argument('--bony_marker_dict',
                         default=os.path.expanduser(
-                            '~/code/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers_bony.yaml'))
+                            '~/code/telePT/SMPL2AddBiomechanics/smpl2ab/data/bsm_markers_bony.yaml'))
     args = parser.parse_args()
 
     # ── resolve paths ──

@@ -22,7 +22,7 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import lsqr
 
-SMPL_PATH   = "/home/haziq/code/SMPL2AddBiomechanics/models/smpl/SMPL_NEUTRAL.pkl"
+SMPL_PATH   = "/home/haziq/code/telePT/SMPL2AddBiomechanics/models/smpl/SMPL_NEUTRAL.pkl"
 MAPPING_NPZ = os.path.expanduser("~/MHR/tools/mhr_smpl_conversion/assets/smpl2mhr_mapping.npz")
 OUT_NPY     = os.path.expanduser("~/MHR/tools/mhr_smpl_conversion/assets/J_regressor_mhr.npy")
 

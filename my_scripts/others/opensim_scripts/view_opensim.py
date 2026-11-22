@@ -18,7 +18,7 @@ python view_opensim.py --osim_path ~/datasets/mocap/data/skel_models_v1.1/bsm.os
 # Rajagopal — full skeleton + 80 lower-body muscles (default pose)
 #   Shows: full skeleton (no skull mesh) in narrow neutral stance.
 #   80 muscle tubes concentrated around hip/upper leg. No marker dots.
-python view_opensim.py --osim_path ~/code/AddBiomechanics/server/data/StandardizedModels/Rajagopal2015_passiveCal_hipAbdMoved.osim
+python view_opensim.py --osim_path ~/code/telePT/AddBiomechanics/server/data/StandardizedModels/Rajagopal2015_passiveCal_hipAbdMoved.osim
 
 # With animated IK motion
 #   Shows: skeleton + muscles animated over time. Space to play/pause.

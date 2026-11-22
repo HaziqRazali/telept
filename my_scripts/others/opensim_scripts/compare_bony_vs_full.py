@@ -4,8 +4,8 @@ Compare AddBiomechanics IK results between full and bony marker sets.
 Usage:
     python compare_bony_vs_full.py <full_subject_dir> <bony_subject_dir> [trial_name]
 
-    full_subject_dir   e.g. ~/code/SMPL2AddBiomechanics/output/band_pull_apart_full/band_pull_apart
-    bony_subject_dir   e.g. ~/code/SMPL2AddBiomechanics/output/band_pull_apart_bony/band_pull_apart
+    full_subject_dir   e.g. ~/code/telePT/SMPL2AddBiomechanics/output/band_pull_apart_full/band_pull_apart
+    bony_subject_dir   e.g. ~/code/telePT/SMPL2AddBiomechanics/output/band_pull_apart_bony/band_pull_apart
     trial_name         e.g. band_pull_apart  (auto-detected if omitted)
 
 Outputs:

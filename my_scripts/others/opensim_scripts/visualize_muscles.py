@@ -6,7 +6,7 @@ Each muscle is drawn as a polyline through its via-points (origin → insertion)
 
 Usage:
     conda activate addbiomechanics
-    cd ~/code/SMPL2AddBiomechanics
+    cd ~/code/telePT/SMPL2AddBiomechanics
 
     # Interactive GUI:
     python ~/datasets/telept/my_scripts/opensim_scripts/visualize_muscles.py \

@@ -15,7 +15,7 @@ Usage (no .mot file needed):
 
     # Full-body BSM (lower-body muscles + full skeleton)
     python render_muscles_static.py \
-        --osim_path ~/code/SMPL2AddBiomechanics/models/bsm/bsm.osim \
+        --osim_path ~/code/telePT/SMPL2AddBiomechanics/models/bsm/bsm.osim \
         --output bsm_muscles_default.png
 
     # Arm26 — upper extremity (biceps, triceps, brachialis)
